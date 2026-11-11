@@ -7,7 +7,14 @@
    accounts: tài khoản đăng nhập theo rạp. appToken: trùng biến APP_TOKEN trên Vercel. */
 window.APP_CONFIG = {
   firebase: {"apiKey": "AIzaSyD9V1j2wKm45es1FusTz8Gm8M8HAfYZuak", "authDomain": "cinema-accouting-dashboard.firebaseapp.com", "databaseURL": "https://cinema-accouting-dashboard-default-rtdb.firebaseio.com", "projectId": "cinema-accouting-dashboard", "storageBucket": "cinema-accouting-dashboard.firebasestorage.app", "messagingSenderId": "711666325662", "appId": "1:711666325662:web:af5a37e0520565e96dc38f", "measurementId": "G-RPE4CNECFW"},
-  accounts: [{ rap: "PHI", ten: "Galaxy Phan Huy Ích", pwd: "galaxy2026" }],
+  accounts: [
+    { rap: "PHI", ten: "Galaxy Phan Huy Ích", pwd: "galaxy2026" },
+    { rap: "QTR", ten: "Galaxy Quang Trung", pwd: "GLXQT123", entity: "CIN-HCM-QTR", tenRap: "Galaxy Quang Trung", quyDM: { petty: 20000000, fnb: 0, float: 60000000 } },
+    { rap: "TCH", ten: "Galaxy Trung Chánh", pwd: "GLXTC456", entity: "CIN-HCM-T12", tenRap: "Galaxy Trung Chánh", quyDM: { petty: 25000000, fnb: 0, float: 80000000 } },
+    { rap: "NVQ", ten: "Galaxy Nguyễn Văn Quá", pwd: "GLXNVQ123", entity: "CIN-HCM-NVQ", tenRap: "Galaxy Nguyễn Văn Quá", quyDM: { petty: 30000000, fnb: 0, float: 70000000 } },
+    { rap: "TRC", ten: "Galaxy Trường Chinh", pwd: "GLXTRC456", entity: "CIN-HCM-TLO", tenRap: "Galaxy Trường Chinh", quyDM: { petty: 20000000, fnb: 0, float: 40000000 } },
+    { rap: "BRI", ten: "Galaxy Bà Rịa", pwd: "GLXBRI123", entity: "CIN-BRV-GMA", tenRap: "Galaxy Bà Rịa", quyDM: { petty: 20000000, fnb: 0, float: 40000000 } }
+  ],
   apiBase: "/api",
   appToken: ""
 };
@@ -322,7 +329,11 @@ function words(x){let n=Math.round(Math.abs(Number(x)||0));if(n===0)return"Khôn
 const MASTER=readJson("seedMaster")||{vendors:[],ifc:[]};
 MASTER.vendors.forEach(v=>{const m=mstN(v[2]);if(m&&m!=="0"){if(!S.byMst.has(m))S.byMst.set(m,[]);S.byMst.get(m).push(v);}S.byNo.set(v[0],v);});
 MASTER.ifc.forEach(r=>S.ifc.set(String(r[0]),r[1]));
-const DEFAULT_SETTINGS=readJson("seedSettings");const KP=readJson("seedKP")||{};
+const DEFAULT_SETTINGS=readJson("seedSettings");const KP=readJson("seedKP")||{};const KP_SEED=JSON.parse(JSON.stringify(KP));
+/* Dữ liệu dựng sẵn (Kinh phí, cài đặt ĐNC, hóa đơn mẫu) chỉ thuộc rạp PHI; rạp khác bắt đầu trống, giữ tên công ty và bảng diễn giải → IFC */
+const isPilot=()=>S.rap==="PHI";
+function defSettings(){if(isPilot())return clone(DEFAULT_SETTINGS);const a=(CFG.accounts||[]).find(x=>x.rap===S.rap)||{};
+  return Object.assign(clone(DEFAULT_SETTINGS),{entityCode:a.entity||"",tenRap:a.tenRap||a.ten||"",nguoiDeNghi:"",duyetChi:"",keToan:"",thuHuongMacDinh:"",banks:[],templates:{},quyDM:a.quyDM?Object.assign({src:"Tạm ứng Tiền Quỹ Tại Rạp"},a.quyDM):undefined,updatedAt:"",updatedBy:"Thiết lập ban đầu"});}
 const cats=()=>S.settings?.cats||[];
 const ifcOfCat=c=>{const r=cats().find(x=>x[0]===c);return r?String(r[1]):""};
 const ifcName=c=>S.ifc.get(String(c))||"";
@@ -339,7 +350,7 @@ const KINDS=["inv","dnc","docs","log","forms","scans","kp","cash"];
 const FB_ITEMS=readJson("seedFB")||[];
 const Store={
   async start(){
-    if(DEMO){const d=readJson("seedDemo")||{};S.settings=clone(DEFAULT_SETTINGS);KINDS.forEach(k=>S[k]=d[k]||[]);S.hist=[];return;}
+    if(DEMO){const d=isPilot()?readJson("seedDemo")||{}:{};S.settings=defSettings();KINDS.forEach(k=>S[k]=d[k]||[]);S.hist=[];return;}
     await loadScript("https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js");
     await loadScript("https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js");
     await loadScript("https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js");
@@ -347,7 +358,7 @@ const Store={
     if(CFG.firebase.measurementId)loadScript("https://www.gstatic.com/firebasejs/10.12.2/firebase-analytics-compat.js").then(()=>{try{firebase.analytics();}catch(e){}}).catch(()=>{});
     await firebase.auth().signInAnonymously();
     const root=firebase.database().ref("ctr/"+S.rap);S.fb=root;const list=(k,v)=>Object.entries(v||{}).map(([id,o])=>fbFix(k,Object.assign({id},o)));
-    root.child("settings").on("value",s=>{S.settings=fbFix("settings",s.val()||clone(DEFAULT_SETTINGS));render();},onErr);
+    root.child("settings").on("value",s=>{S.settings=fbFix("settings",s.val()||defSettings());render();},onErr);
     let loaded=0;KINDS.forEach(k=>root.child(k).on("value",s=>{S[k]=list(k,s.val());if(++loaded===KINDS.length)seedOffer();render();},onErr));
     root.child("hist").limitToLast(30).on("value",s=>{S.hist=list(s.val()).sort((a,b)=>(b.at||"").localeCompare(a.at||""));},onErr);
     firebase.database().ref(".info/connected").on("value",s=>{$("#stat").textContent=s.val()?"● Đã đồng bộ":"○ Mất kết nối, thay đổi sẽ gửi khi có mạng";});
@@ -376,7 +387,7 @@ function fbFix(k,o){if(!o||typeof o!=="object")return o;if(!DEMO)fixPaths(o);con
   if(k==="kp"){A(o,"rows");o.rows.forEach(r=>A(r,"m"));o.notes=kDec(o.notes)||{};o.info=kDec(o.info)||{};}
   return o;}
 /* Lần đầu chạy trên Vercel: cơ sở dữ liệu trống thì cho nạp dữ liệu PHI đã gửi */
-function seedOffer(){if(DEMO||S._seedAsked)return;S._seedAsked=true;const d=readJson("seedDemo");if(!d)return;
+function seedOffer(){if(DEMO||S._seedAsked||!isPilot())return;S._seedAsked=true;const d=readJson("seedDemo");if(!d)return;
   S.fb.child("meta/seeded").once("value").then(x=>{if(x.exists()||S.inv.length||S.forms.length||S.dnc.length)return;seedLoad();}).catch(()=>{});}
 async function seedLoad(){const d=readJson("seedDemo");if(!d)return;const up={};
   KINDS.forEach(k=>(d[k]||[]).forEach(o=>{const b=clean(o);const id=b.id||uid();delete b.id;if(k==="kp"){b.notes=kEnc(b.notes);b.info=kEnc(b.info);}up[k+"/"+id]=b;}));
@@ -423,7 +434,7 @@ function showLogin(err){
     if(!a||$("#lp").value!==a.pwd)return showLogin("Sai mật khẩu của "+(a?a.ten:"rạp")+".");try{sessionStorage.setItem("ctr-session",a.rap)}catch(e){}enter(a);};
   setTimeout(()=>$("#lp")?.focus(),50);}
 async function enter(a){
-  S.rap=a.rap;$("#loginView").hidden=true;$("#app").hidden=false;$("#ttl").textContent=a.ten;S.tab="budget";
+  S.rap=a.rap;Object.keys(KP).forEach(k=>delete KP[k]);if(a.rap==="PHI")Object.assign(KP,JSON.parse(JSON.stringify(KP_SEED)));$("#loginView").hidden=true;$("#app").hidden=false;$("#ttl").textContent=a.ten;S.tab="budget";
   $("#stat").textContent=DEMO?"":"Đang kết nối…";
   try{await Store.start();}catch(e){banner("Không kết nối được Firebase: "+esc(e.message||e),"bad");}
   setupPeriod();render();}
@@ -1255,7 +1266,7 @@ async function ttImport(file){try{const wb=await readXlsx(file);const ent=S.sett
 const QUY={petty:"Quỹ rạp (petty cash)",fnb:"Quỹ F&B",float:"Float"};
 const cashDoc=q=>S.cash.find(x=>x.id===q);
 const cashRows=q=>(cashDoc(q)?.rows||[]).map((r,i)=>Object.assign({q,i},r));
-const qDM=q=>+((S.settings?.quyDM||{})[q])||+(cashDoc(q)?.tamUng)||({petty:+(S.settings?.tamUngQuyRap)||20000000,fnb:15000000,float:60000000})[q];
+const qDM=q=>{const v=(S.settings?.quyDM||{})[q];return v!=null&&v!==""?+v:qDM0(q);};const qDM0=q=>+(cashDoc(q)?.tamUng)||({petty:+(S.settings?.tamUngQuyRap)||20000000,fnb:15000000,float:60000000})[q];
 const pendAt=(q,d)=>cashRows(q).filter(r=>r.date<=d&&(r.st==="pending"||(r.ngayHoan&&r.ngayHoan>d)));
 const qOfForm=f=>f.type==="quy_rap"?"petty":f.type==="quy_fb"?"fnb":f.type==="float"?"float":null;
 function cashRec(f){const q=qOfForm(f);if(!q)return null;const dm=qDM(q);const cnt=cashTotal(f);const doc=cashDoc(q);
