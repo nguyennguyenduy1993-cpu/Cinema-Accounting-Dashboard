@@ -357,6 +357,18 @@ const PAGE={hoa_don_vat:"Hóa đơn GTGT",bao_cao_dich_vu:"Báo cáo dịch vụ
 /* sửa MST đọc sai 1 ký tự: sai 1 số, thừa 1 số hoặc thiếu 1 số so với MST đã có trong danh mục NCC */
 function ed1(a,b){if(a===b)return false;if(Math.abs(a.length-b.length)>1)return false;if(a.length===b.length){let d=0;for(let i=0;i<a.length;i++)if(a[i]!==b[i]&&++d>1)return false;return d===1;}
   const [l,s2]=a.length>b.length?[a,b]:[b,a];for(let i=0;i<l.length;i++)if(l.slice(0,i)+l.slice(i+1)===s2)return true;return false;}
+/* không đọc được MST ở dòng "Mã số thuế": tìm MST đã biết ở bất kỳ đâu trong file (link tra cứu, ĐNC…), sau đó dò theo tên NCC */
+function mstGuess(text){const BUY="0101595681";const known=new Set([...S.byMst.keys(),...Object.keys(tpls())]);const n=OCRP.norm(text).replace(/(\d)o|o(?=\d)/g,(m,a)=>(a||"")+"0");
+  const cnt=new Map();const add=x=>{if(x===BUY)return;let k=known.has(x)?x:null;if(!k){const nr=nearestMst(x);if(nr&&nr!==x&&nr.replace(/-.*/,"")!==BUY)k=nr;}if(k)cnt.set(k,(cnt.get(k)||0)+1);};
+  [n,n.replace(/(\d)[ .](?=\d)/g,"$1")].forEach(t=>(t.match(/(?<!\d)\d{10}(?:-\d{3})?(?!\d)/g)||[]).forEach(add));
+  if(cnt.size){const best=[...cnt.entries()].sort((a,b)=>b[1]-a[1]);if(best.length===1||best[0][1]>best[1][1])return{mst:best[0][0],from:"số MST xuất hiện trong file"};}
+  const core=x=>nrm(x).replace(/\b(cong ty|cty|tnhh|trach nhiem huu han|co phan|cp|mot thanh vien|mtv|hai thanh vien|chi nhanh|thanh pho|tp|ho chi minh|hcm|viet nam|vn)\b/g," ").replace(/\s+/g," ").trim();
+  const L=String(text).split(/\n/).map(x=>OCRP.norm(x));const isBuy=x=>/buyer|nguoi mua|company name|ten don vi|don vi mua|ten khach/.test(x);
+  const buyT=" "+L.filter(isBuy).map(nrm).join(" ")+" ";const sellT=" "+L.flatMap((x,i)=>/seller|don vi ban|nguoi ban|ben ban|don vi cung cap|thu huong|nguoi nhan tien/.test(x)?[x,L[i+1]||""]:[]).map(nrm).join(" ")+" ";
+  const allT=" "+L.filter(x=>!isBuy(x)).map(nrm).join(" ")+" ";
+  const names=[...Object.entries(tpls()).map(([m,t])=>[m,t.name]),...[...S.byMst.entries()].flatMap(([m,vs])=>vs.map(v=>[m,v[1]]))].filter(([m])=>m.replace(/-.*/,"")!==BUY).map(([m,nm])=>[m,core(nm)]).filter(([,c])=>c&&!buyT.includes(" "+c+" "));
+  const pick=(T,min)=>{const h=names.filter(([,c])=>c.length>=min&&T.includes(" "+c+" ")).sort((a,b)=>b[1].length-a[1].length);return h.length&&h.every(x=>x[0]===h[0][0]||x[1].length<h[0][1].length)?h[0][0]:null;};
+  const m1=sellT.trim()&&pick(sellT,3);if(m1)return{mst:m1,from:"tên người bán trên hóa đơn"};const m2=pick(allT,6);return m2?{mst:m2,from:"tên NCC trên file"}:null;}
 function nearestMst(m){if(!m||S.byMst.has(m))return m;const base=m.replace(/-.*/,"");const hit=[...S.byMst.keys()].filter(k=>ed1(k.replace(/-.*/,""),base));return hit.length===1?hit[0]:null;}
 
 /* ---------- Lưu trữ dữ liệu ---------- */
@@ -574,7 +586,8 @@ function checks(d,selfId){
   const dup=S.inv.find(i=>i.id!==selfId&&i.status==="confirmed"&&i.seller?.mst===d.seller?.mst&&String(i.number)===String(d.number)&&String(i.serial||"")===String(d.serial||""));
   if(dup)add("bad",`Trùng hóa đơn đã lưu ngày ${dmy(dup.createdAt)}`,"number");
   if(d.dncNumber&&d.number&&d.dncNumber!==d.number)add("warn",`Số HĐ đọc trên hóa đơn (${d.number}) khác số ghi trên ĐNC kèm theo (${d.dncNumber}). Kiểm tra bản gốc.`,"number");
-  if(d.mstFixed)add("warn",`MST đọc được ${d.mstFixed} không có trong danh mục, đã lấy MST gần nhất ${d.seller.mst}.`,"mst");
+  if(d.mstFrom)add("warn",`Không đọc rõ MST ở dòng "Mã số thuế" trên hóa đơn${d.mstFixed?" (đọc ra "+d.mstFixed+")":""}, đã lấy MST ${d.seller.mst} theo ${d.mstFrom}. Kiểm tra lại trước khi xác nhận.`,"mst");
+  else if(d.mstFixed)add("warn",`MST đọc được ${d.mstFixed} không có trong danh mục, đã lấy MST gần nhất ${d.seller.mst}.`,"mst");
   {const vr=tpls()[d.seller?.mst]?.vatRate;(d.fixed||[]).forEach(x=>add(/ghép từ các số tiền/.test(x)&&vr&&Math.abs(d.subtotal*vr/100-d.vat)<=2?"inf":"warn",x,""));}
   if(d.payeeKey==="__new")add("warn","Tài khoản thụ hưởng mới. Đối chiếu trước khi xác nhận.","payee");
   if(d.invoiceCount>1)add("warn",`File có ${d.invoiceCount} hóa đơn. Tách file và tải lại phần còn lại.`,"");
@@ -605,7 +618,7 @@ async function processItem(q){
     const r=OCRP.parse(texts);
     if(r.ok&&!r.number&&cropNo){try{step("Đang đọc lại ô số hóa đơn…");const n=OCRP.numberLoose(await cropNo(r.pages.findIndex(p=>p.type==="hoa_don_vat")));if(n){r.number=n;r.numberRaw=n;r.numberFrom="ô Số HĐ";}}catch(e){}}
     if(!r.ok)return nonInvoice(q,r,texts,thumbs,hash);
-    const d=buildDraft(r,q);
+    r.allText=texts.join("\n");const d=buildDraft(r,q);
     const miss=[!d.seller.mst&&"MST",!d.number&&"số hóa đơn",!d.total&&"tổng tiền"].filter(Boolean);
     if(miss.length)return skip(q,"Lỗi",`Hóa đơn mờ hoặc lỗi, không đọc được ${miss.join(", ")}. Scan lại rõ hơn rồi tải lên.`);
     const dup=S.inv.find(i=>i.seller?.mst===d.seller.mst&&String(i.number)===String(d.number)&&String(i.serial||"")===String(d.serial||""));
@@ -648,7 +661,8 @@ async function nonInvoice(q,r,texts,thumbs,hash){const types=r.pages.map(p=>p.ty
 function imgCanvas(f){return new Promise((ok,no)=>{const im=new Image();im.onload=()=>{const c=document.createElement("canvas");c.width=im.naturalWidth;c.height=im.naturalHeight;c.getContext("2d").drawImage(im,0,0);ok(c);};im.onerror=no;im.src=URL.createObjectURL(f);});}
 function ruleFor(tpl,desc){const n=nrm(desc);const rs=(tpl?.rules||[]);return rs.find(r=>r[0]&&n.includes(nrm(r[0])))||rs.find(r=>!r[0])||null;}
 function buildDraft(r,q){
-  let mst=r.mst,mstFixed=null;if(mst&&!S.byMst.has(mst)){const near=nearestMst(mst);if(near){mstFixed=mst;mst=near;}}
+  let mst=r.mst,mstFixed=null,mstFrom=null;if(mst&&!S.byMst.has(mst)){const near=nearestMst(mst);if(near){mstFixed=mst;mst=near;}}
+  if(!mst||(!S.byMst.has(mst)&&!tpls()[mst])){const g=mstGuess(r.allText||r.text||"");if(g&&g.mst!==mst){if(mst)mstFixed=mst;mst=g.mst;mstFrom=g.from;}}
   const tpl=tpls()[mst]||null;
   if(tpl?.anchors){const a=OCRP.readAnchors(r.text,tpl.anchors);["number","date","subtotal","vat","total"].forEach(k=>{if(a[k]&&!r[k])r[k]=a[k];});}
   let serial=r.serial;if(tpl?.lastSerial&&(!serial||serial!==tpl.lastSerial&&serial.length===tpl.lastSerial.length&&[...serial].filter((ch,i)=>ch!==tpl.lastSerial[i]).length<=1))serial=tpl.lastSerial;
@@ -662,7 +676,7 @@ function buildDraft(r,q){
   const gopTxt=tpl?.gop?.[cat]||null;
   const bk=banks().find(b=>b.mst&&mstN(b.mst)===mst);
   return{status:"draft",createdAt:nowIso(),source:"Quét từ PDF",pages:r.pages,invoiceCount:r.invoiceCount||1,text:r.text,
-    seller:{name:v?v[1]:(tpl?.name||""),mst},mstFixed,vendorNo:used?used.vendorNo:(v?v[0]:""),serial,number:r.number||"",numberRaw:r.numberRaw||r.number||"",dncNumber:r.dncNumber||"",
+    seller:{name:v?v[1]:(tpl?.name||""),mst},mstFixed,mstFrom,vendorNo:used?used.vendorNo:(v?v[0]:""),serial,number:r.number||"",numberRaw:r.numberRaw||r.number||"",dncNumber:r.dncNumber||"",
     date:r.date||"",month:ymOf(r.date),ky:r.ky||ymOf(r.date),items,subtotal:r.subtotal||0,vat:r.vat||0,total:r.total||0,fixed:r.fixed||[],
     cat,gop:gopTxt,payeeKey:tpl?.payeeKey||(bk?bk.key:S.settings?.thuHuongMacDinh||""),noDnc:!!tpl?.noDnc,note:"",userNote:"",learned:!!tpl};
 }
