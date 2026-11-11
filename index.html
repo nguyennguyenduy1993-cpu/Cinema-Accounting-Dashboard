@@ -229,7 +229,48 @@ function msts(t){const n=norm(t),out=[];const re=/(m[a-z]{1,2}\s*s[a-z0-9]{1,2}\
 function moneys(line){return(line.match(MONEY)||[]).map(toNum);}
 function lastMoney(line){const a=moneys(line);return a.length?a[a.length-1]:0;}
 function findLine(lines,re,ex){for(let i=0;i<lines.length;i++){const l=lines[i],n=norm(l);if(!re.test(n)||(ex&&ex.test(n)))continue;if(lastMoney(l))return l;const nx=lines[i+1]||"";if(lastMoney(nx)&&!/[a-z]{4}/.test(norm(nx)))return nx;}return null;}
+/* Số tiền viết bằng chữ → số (chịu được lỗi OCR nhẹ: mất dấu, sai 1 ký tự) */
+const WD={khong:0,mot:1,hai:2,ba:3,bon:4,tu:4,nam:5,lam:5,sau:6,bay:7,tam:8,chin:9};const WS={tram:"H",muoi:"T",nghin:3,ngan:3,trieu:6,ty:9,linh:"L",le:"L"};
+function ed1w(a,b){if(Math.abs(a.length-b.length)>1)return false;let i=0,j=0,d=0;while(i<a.length&&j<b.length){if(a[i]===b[j]){i++;j++;continue;}if(++d>1)return false;if(a.length>b.length)i++;else if(a.length<b.length)j++;else{i++;j++;}}return d+(a.length-i)+(b.length-j)<=1;}
+function wTok(w){if(w in WD||w in WS)return w;if(/^tri[a-z]{1,3}$/.test(w))return"trieu";if(/^ngh[a-z]{1,3}$/.test(w))return"nghin";if(w.length<3)return null;
+  const c=[...Object.keys(WD),...Object.keys(WS)].filter(k=>k.length>=3&&ed1w(w,k));return c.length===1?c[0]:null;}
+function wordsNum(s){const ws=norm(s).replace(/[^a-z ]/g," ").split(/\s+/).filter(Boolean);let acc=0,g=0,p=null,seen=0;
+  for(const w0 of ws){if(/^(dong|chan|vnd)$/.test(w0))break;const w=wTok(w0);if(w===null){if(seen)return 0;continue;}seen++;
+    if(w in WD){p=WD[w];continue;}const k=WS[w];
+    if(k==="L")continue;if(k==="H"){g+=(p??1)*100;p=null;continue;}if(k==="T"){g+=(p===null?1:p)*10;p=null;continue;}
+    const v=g+(p||0);acc+=(v||1)*Math.pow(10,k);g=0;p=null;}
+  const r=acc+g+(p||0);return seen>=2&&r>=1000?r:0;}
+function wordsTotal(t){const L=t.split(/\n/);for(let i=0;i<L.length;i++){const n=norm(L[i]);const m=n.match(/(bang\s*ch[a-z]{1,3}|in\s*words)\)?\s*[:.]?\s*(.*)$/);if(!m)continue;
+    let x=m[2];if(!/\bdong\b/.test(x))x+=" "+norm(L[i+1]||"");const v=wordsNum(x);if(v)return v;}return 0;}
+function triples(t){const am=[...new Set((t.match(/\d{1,3}(?:[.,]\d{3}){1,4}(?![.,]?\d)/g)||[]).map(toNum).filter(x=>x>=1000))].sort((a,b)=>b-a);const out=[];
+  for(const c of am)for(const a of am){if(a>=c)continue;const b=c-a;if(am.includes(b)&&[5,8,10].some(r=>Math.abs(a*r/100-b)<=2))out.push([a,b,c]);}return out;}
 function fixSerial(s){s=String(s||"").toUpperCase();if(/^\d[0OC]\d\d[A-Z]{2,3}$/.test(s))s=s[0]+"C"+s.slice(2);return/^\dC\d\d[A-Z]{2,3}$/.test(s)?s:"";}
+/* Chốt số tiền: ưu tiên Bằng chữ → ĐNC đi kèm → số trên hóa đơn; chỉ nhận khi có ít nhất 2 nguồn/2 con số độc lập khớp nhau */
+function reconcile(res,raw,W,D,t){const r=res.vatRate,multi=res.multiRate;const ok3=x=>x&&x[0]>0&&x[1]>=0&&x[2]>0&&Math.abs(x[0]+x[1]-x[2])<=2;const near=(a,b)=>a&&Math.abs(a-b)<=2;
+  const am=new Set((t.match(/\d{1,3}(?:[.,]\d{3}){1,4}(?![.,]?\d)/g)||[]).map(toNum).filter(x=>x>=1000));const freq=v=>(t.match(new RegExp("(?<![\\d.,])"+v.toLocaleString("en-US").replace(/,/g,"[.,]")+"(?![\\d]|[.,]\\d)","g"))||[]).length;const maxAm=Math.max(0,...am);const dT=[...new Map(D.map(x=>[x.join(),x])).values()];
+  const ratio=(s,v)=>s>0&&v/s>0.045&&v/s<0.105;const split=T=>{if(!r||multi)return null;const s=Math.round(T*100/(100+r));return[s,T-s,T];};
+  const cand=[];const add=(x,g)=>{if(ok3(x)&&!cand.some(c=>c.x.join()===x.join()))cand.push({x,g});};
+  if(W){dT.filter(x=>near(x[2],W)).forEach(x=>add(x,0));if(raw[1])add([W-raw[1],raw[1],W],0);if(raw[0])add([raw[0],W-raw[0],W],0);[...am].filter(v=>v<W&&ratio(v,W-v)).forEach(v=>add([v,W-v,W],0));[...am].filter(v=>v<W&&ratio(W-v,v)).forEach(v=>add([W-v,v,W],0));const sp=split(W);if(sp)add(sp,0);}
+  if(dT.length===1)add(dT[0],1);
+  triples(t).forEach(x=>add(x,2));add(raw,2);const Ts=[raw[2]].filter(Boolean);
+  Ts.forEach(T=>{if(raw[1])add([T-raw[1],raw[1],T],2);if(raw[0])add([raw[0],T-raw[0],T],2);[...am].filter(v=>v<T&&ratio(v,T-v)).forEach(v=>add([v,T-v,T],2));[...am].filter(v=>v<T&&ratio(T-v,v)).forEach(v=>add([T-v,v,T],2));const sp=split(T);if(sp)add(sp,2);});
+  if(raw[0]&&raw[1])add([raw[0],raw[1],raw[0]+raw[1]],2);if(r&&raw[1]){const s=Math.round(raw[1]*100/r);add([s,raw[1],s+raw[1]],2);}
+  const sup=x=>{let n=0;const why=[];if(W&&near(W,x[2])){n++;why.push("số viết bằng chữ");}if(dT.some(d=>near(d[2],x[2]))){n++;why.push("trang ĐNC");}
+    let k=0,pg=0;[0,1,2].forEach(i=>{if(near(raw[i],x[i]))k++;else if(x[i]&&am.has(x[i]))pg++;});if(k){n+=k;why.push(k+" số đọc đúng nhãn trên hóa đơn");}if(pg){n+=pg/2;why.push(pg+" số in trên hóa đơn");}
+    if([5,8,10].some(q=>Math.abs(x[0]*q/100-x[1])<=2))n+=0.5;else if(r&&!multi)n-=1;
+    const anc=near(x[2],raw[2])||near(x[2],W)||dT.some(d=>near(d[2],x[2]))||x[2]===maxAm;if(!anc)n=Math.min(n,1);
+    const rt=[5,8,10].some(q=>Math.abs(x[0]*q/100-x[1])<=2),seen=v=>v&&(raw.some(y=>near(y,v))||am.has(v));
+    const ts=(W&&near(W,x[2])?1:0)+(dT.some(d=>near(d[2],x[2]))?1:0)+(near(raw[2],x[2])?1:0)+(seen(x[0])&&seen(x[1])?1:0)+(freq(x[2])>=(near(raw[2],x[2])?2:1)?0.5:0)+(rt&&seen(x[0])?0.5:0)+(rt&&seen(x[1])?0.5:0);
+    return{n,why,ts};};
+  cand.forEach(c=>{Object.assign(c,sup(c.x));c.s=c.n+(freq(c.x[1])>=2?0.25:0);});
+  cand.sort((a,b)=>a.g-b.g||b.s-a.s);let best=cand.find(c=>c.n>=2&&c.ts>=2);
+  if(best){const tie=cand.find(c=>c!==best&&c.g===best.g&&c.n>=2&&c.ts>=2&&c.s===best.s&&c.x.join()!==best.x.join());if(tie)best=null;}
+  const L=v=>(v||0).toLocaleString("vi-VN");
+  if(!best){res.subtotal=0;res.vat=0;res.total=0;res.amtBad=`Không chắc số tiền: ${[W&&"bằng chữ "+L(W),dT.length&&"ĐNC "+dT.map(x=>L(x[2])).join("/"),raw.some(Boolean)&&"số trên HĐ "+raw.map(L).join(" / ")].filter(Boolean).join("; ")||"không đọc được bộ số tiền nào khớp nhau"}. Nhập tay theo hóa đơn.`;return;}
+  const changed=best.x[0]!==raw[0]||best.x[1]!==raw[1]||best.x[2]!==raw[2];const wasG=res.fixed.some(f=>/ghép/.test(f));[res.subtotal,res.vat,res.total]=best.x;res.amtSrc=best.why.join(" + ");
+  res.fixed=res.fixed.filter(f=>!/Tổng tiền lấy từ trang ĐNC/.test(f));
+  if(changed&&!wasG)res.fixed.push(`Số tiền chốt theo ${best.why.join(" + ")}`+(raw.some(Boolean)?` (đọc thẳng trên HĐ: ${raw.map(L).join(" / ")})`:""));
+  if(W&&!near(W,best.x[2]))res.fixed.push(`Số viết bằng chữ đọc ra ${L(W)}, không khớp tổng ${L(best.x[2])}`);}
 function parse(pageTexts){
   const types=pageTexts.map(classify);const ip=types.indexOf("hoa_don_vat");const res={pages:types.map((t,i)=>({page:i+1,type:t})),invoiceCount:types.filter(t=>t==="hoa_don_vat").length,ok:ip>=0};
   if(ip<0)return res;
@@ -251,19 +292,14 @@ function parse(pageTexts){
     const vatLines=lines.filter(l=>/ti[a-z]n\s*thu[a-z]\s*gtgt|vat\s*am|t[a-z]ng\s*s[a-z0-9]\s*ti[a-z]n\s*thu|ti[a-z]n\s*thu[a-z]\s*gi[a-z]\s*tr/.test(norm(l))&&lastMoney(l));
     const tv=vatLines.find(l=>/t[a-z]ng/.test(norm(l).slice(0,12)));res.vat=tv?lastMoney(tv):vatLines.reduce((s,l)=>s+lastMoney(l),0);}
   const rc={};(n.match(/\b(5|8|10)\s*%/g)||[]).forEach(x=>{const k=parseInt(x);rc[k]=(rc[k]||0)+1;});const rk=Object.keys(rc).sort((x,y)=>rc[y]-rc[x]);res.vatRate=rk.length?Number(rk[0]):null;res.multiRate=rk.length>1;
+  const raw=[res.subtotal||0,res.vat||0,res.total||0];
   const ip3=types.indexOf("de_nghi_chi");
   if(!res.total&&ip3>=0){const dl=pageTexts[ip3].split(/\n/).find(l=>/t[a-z]{1,2}ng.{0,8}thanh\s*to[a-z]n/.test(norm(l))&&lastMoney(l));if(dl){res.total=lastMoney(dl);res.fixed=(res.fixed||[]).concat("Tổng tiền lấy từ trang ĐNC đi kèm");}}
   /* nhãn và số tiền bị tách dòng (bố cục 2 cột): tìm bộ 3 số tiền trên trang hóa đơn thỏa trước thuế + thuế = tổng, thuế = 5/8/10% */
   if(!res.total){const am=[...new Set((t.match(/\d{1,3}(?:[.,]\d{3}){1,4}(?![.,]?\d)/g)||[]).map(toNum).filter(x=>x>=1000))].sort((a,b)=>b-a);let best=null;
     for(const c of am){for(const a of am){if(a>=c)continue;const b=c-a;for(const r of [5,8,10])if(Math.abs(a*r/100-b)<=2&&am.includes(b)){best=[a,b,c];break;}if(best)break;}if(best)break;}
     if(best){[res.subtotal,res.vat,res.total]=best;res.fixed=(res.fixed||[]).concat("Tổng tiền ghép từ các số tiền trên hóa đơn (nhãn và số bị tách dòng)");}}
-  const r=res.vatRate;res.fixed=res.fixed||[];
-  if(r&&!(Math.abs(res.subtotal+res.vat-res.total)<=2&&(res.multiRate||Math.abs(res.subtotal*r/100-res.vat)<=2))){
-    const c=[];if(res.vat){const s1=Math.round(res.vat*100/r);c.push([s1,res.vat,s1+res.vat]);}
-    if(res.total){const s2=Math.round(res.total*100/(100+r));c.push([s2,res.total-s2,res.total]);}
-    const score=x=>(x[0]===res.subtotal)+(x[1]===res.vat)+(x[2]===res.total);c.sort((a,b)=>score(b)-score(a));
-    const need=(!res.subtotal&&!res.vat)?1:(res.multiRate?2:1);const best=c.find(x=>Math.abs(x[0]*r/100-x[1])<=2&&score(x)>=need);
-    if(best){if(best[0]!==res.subtotal||best[1]!==res.vat||best[2]!==res.total)res.fixed.push("Tự sửa số đọc lệch theo thuế suất "+r+"%");[res.subtotal,res.vat,res.total]=best;}}
+  res.fixed=res.fixed||[];reconcile(res,raw,wordsTotal(t),ip3>=0?triples(pageTexts[ip3]):[],t);
   if(res.subtotal&&res.total&&Math.abs(res.subtotal+res.vat-res.total)>2){if(res.total>res.subtotal)res.vat=res.total-res.subtotal;}
   if(res.subtotal&&res.vat&&!res.total)res.total=res.subtotal+res.vat;
   if(!res.subtotal&&res.total&&res.vat)res.subtotal=res.total-res.vat;
@@ -293,7 +329,7 @@ function numberLoose(t){const L=String(t||"").split(/\n/);
   const pats=[/S[oóòôốồỏ0][^\n\d]{0,14}?[:;]+\s*([0-9]{1,8})\b/,/\bNo\.?\)?\s*[:;]?\s*([0-9]{2,8})\b/,/S[oóòôốồỏ0]\s*h[oóa]{1,2}\s*[dđ][oơ]n[^\n\d]{0,24}?([0-9]{2,8})\b/i];
   for(const re of pats)for(const l of L){const m=l.match(re);if(!m)continue;const pre=l.slice(0,m.index+m[0].length-m[1].length);if(bad.test(pre))continue;return m[1].replace(/^0+(?=\d)/,"");}
   return"";}
-return{parse,classify,learn,readAnchors,norm,numberLoose};
+return{parse,wordsNum,classify,learn,readAnchors,norm,numberLoose};
 })();
 if(typeof module!=="undefined")module.exports=OCRP;
 </script>
@@ -589,6 +625,9 @@ function checks(d,selfId){
   if(d.mstFrom)add("warn",`Không đọc rõ MST ở dòng "Mã số thuế" trên hóa đơn${d.mstFixed?" (đọc ra "+d.mstFixed+")":""}, đã lấy MST ${d.seller.mst} theo ${d.mstFrom}. Kiểm tra lại trước khi xác nhận.`,"mst");
   else if(d.mstFixed)add("warn",`MST đọc được ${d.mstFixed} không có trong danh mục, đã lấy MST gần nhất ${d.seller.mst}.`,"mst");
   {const vr=tpls()[d.seller?.mst]?.vatRate;(d.fixed||[]).forEach(x=>add(/ghép từ các số tiền/.test(x)&&vr&&Math.abs(d.subtotal*vr/100-d.vat)<=2?"inf":"warn",x,""));}
+  if(d.amtBad)add(d.total?"warn":"bad",d.total?"Số tiền đã nhập tay. "+d.amtBad.replace(/ Nhập tay theo hóa đơn\.$/,"")+". Đối chiếu lại với hóa đơn gốc.":d.amtBad,"total");
+  if(d.subtotal&&d.seller?.mst){const h=S.inv.filter(i=>i.id!==selfId&&i.status==="confirmed"&&i.seller?.mst===d.seller.mst&&(!d.cat||i.cat===d.cat)&&i.subtotal).sort((a,b)=>(b.date||"").localeCompare(a.date||"")).slice(0,3);
+    if(h.length){const av=h.reduce((a,i)=>a+i.subtotal,0)/h.length;const pc=(d.subtotal-av)/av;if(Math.abs(pc)>0.3)add("warn",`Trước thuế ${fmt(d.subtotal)} lệch ${pc>0?"+":""}${Math.round(pc*100)}% so với trung bình ${h.length} lần gần nhất của NCC này (${fmt(Math.round(av))}). Kiểm tra lại số tiền.`,"subtotal");}}
   if(d.payeeKey==="__new")add("warn","Tài khoản thụ hưởng mới. Đối chiếu trước khi xác nhận.","payee");
   if(d.invoiceCount>1)add("warn",`File có ${d.invoiceCount} hóa đơn. Tách file và tải lại phần còn lại.`,"");
   if(d.ky&&d.date&&d.ky!==ymOf(d.date))add("inf",`Kỳ chi phí ${ymLbl(d.ky)} khác tháng hóa đơn ${ymLbl(ymOf(d.date))}: Kinh phí tính vào ${ymLbl(d.ky)}, ĐNC nằm ở tháng ${ymLbl(ymOf(d.date))}.`,"");
@@ -619,7 +658,7 @@ async function processItem(q){
     if(r.ok&&!r.number&&cropNo){try{step("Đang đọc lại ô số hóa đơn…");const n=OCRP.numberLoose(await cropNo(r.pages.findIndex(p=>p.type==="hoa_don_vat")));if(n){r.number=n;r.numberRaw=n;r.numberFrom="ô Số HĐ";}}catch(e){}}
     if(!r.ok)return nonInvoice(q,r,texts,thumbs,hash);
     r.allText=texts.join("\n");const d=buildDraft(r,q);
-    const miss=[!d.seller.mst&&"MST",!d.number&&"số hóa đơn",!d.total&&"tổng tiền"].filter(Boolean);
+    const miss=[!d.seller.mst&&"MST",!d.number&&"số hóa đơn",!d.total&&!d.amtBad&&"tổng tiền"].filter(Boolean);
     if(miss.length)return skip(q,"Lỗi",`Hóa đơn mờ hoặc lỗi, không đọc được ${miss.join(", ")}. Scan lại rõ hơn rồi tải lên.`);
     const dup=S.inv.find(i=>i.seller?.mst===d.seller.mst&&String(i.number)===String(d.number)&&String(i.serial||"")===String(d.serial||""));
     if(dup)return skip(q,"Trùng",`Trùng HĐ ${d.serial} ${d.number} (${d.seller.name}) đã ${dup.status==="confirmed"?"lưu":"chờ xác nhận"}. Không tạo ĐNC.`);
@@ -664,7 +703,7 @@ function buildDraft(r,q){
   let mst=r.mst,mstFixed=null,mstFrom=null;if(mst&&!S.byMst.has(mst)){const near=nearestMst(mst);if(near){mstFixed=mst;mst=near;}}
   if(!mst||(!S.byMst.has(mst)&&!tpls()[mst])){const g=mstGuess(r.allText||r.text||"");if(g&&g.mst!==mst){if(mst)mstFixed=mst;mst=g.mst;mstFrom=g.from;}}
   const tpl=tpls()[mst]||null;
-  if(tpl?.anchors){const a=OCRP.readAnchors(r.text,tpl.anchors);["number","date","subtotal","vat","total"].forEach(k=>{if(a[k]&&!r[k])r[k]=a[k];});}
+  if(tpl?.anchors){const a=OCRP.readAnchors(r.text,tpl.anchors);["number","date","subtotal","vat","total"].forEach(k=>{if(r.amtBad&&/total|vat/.test(k))return;if(a[k]&&!r[k])r[k]=a[k];});}
   let serial=r.serial;if(tpl?.lastSerial&&(!serial||serial!==tpl.lastSerial&&serial.length===tpl.lastSerial.length&&[...serial].filter((ch,i)=>ch!==tpl.lastSerial[i]).length<=1))serial=tpl.lastSerial;
   const v=(S.byMst.get(mst)||[])[0];const used=S.inv.find(i=>i.status==="confirmed"&&i.seller?.mst===mst&&i.vendorNo);
   let items=(r.items&&r.items.length?r.items:[{desc:"",amount:r.subtotal}]).map(it=>{const ru=ruleFor(tpl,it.desc);return{desc:it.desc,amount:it.amount,vatRate:r.vatRate||tpl?.vatRate||null,hm:ru?ru[2]:""};});
@@ -677,7 +716,7 @@ function buildDraft(r,q){
   const bk=banks().find(b=>b.mst&&mstN(b.mst)===mst);
   return{status:"draft",createdAt:nowIso(),source:"Quét từ PDF",pages:r.pages,invoiceCount:r.invoiceCount||1,text:r.text,
     seller:{name:v?v[1]:(tpl?.name||""),mst},mstFixed,mstFrom,vendorNo:used?used.vendorNo:(v?v[0]:""),serial,number:r.number||"",numberRaw:r.numberRaw||r.number||"",dncNumber:r.dncNumber||"",
-    date:r.date||"",month:ymOf(r.date),ky:r.ky||ymOf(r.date),items,subtotal:r.subtotal||0,vat:r.vat||0,total:r.total||0,fixed:r.fixed||[],
+    date:r.date||"",month:ymOf(r.date),ky:r.ky||ymOf(r.date),items,subtotal:r.subtotal||0,vat:r.vat||0,total:r.total||0,fixed:r.fixed||[],amtBad:r.amtBad||"",
     cat,gop:gopTxt,payeeKey:tpl?.payeeKey||(bk?bk.key:S.settings?.thuHuongMacDinh||""),noDnc:!!tpl?.noDnc,note:"",userNote:"",learned:!!tpl};
 }
 function learnTemplate(d){
