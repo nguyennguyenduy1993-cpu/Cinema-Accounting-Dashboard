@@ -300,6 +300,7 @@ function parse(pageTexts,nth){
     for(const c of am){for(const a of am){if(a>=c)continue;const b=c-a;for(const r of [5,8,10])if(Math.abs(a*r/100-b)<=2&&am.includes(b)){best=[a,b,c];break;}if(best)break;}if(best)break;}
     if(best){[res.subtotal,res.vat,res.total]=best;res.fixed=(res.fixed||[]).concat("Tổng tiền ghép từ các số tiền trên hóa đơn (nhãn và số bị tách dòng)");}}
   res.fixed=res.fixed||[];reconcile(res,raw,wordsTotal(t),ip3>=0?triples(pageTexts[ip3]):[],t);
+  {const q=[5,8,10].find(q=>res.subtotal&&Math.abs(res.subtotal*q/100-res.vat)<=Math.max(2,res.subtotal*0.0005));if(q)res.vatRate=q;}
   if(res.subtotal&&res.total&&Math.abs(res.subtotal+res.vat-res.total)>2){if(res.total>res.subtotal)res.vat=res.total-res.subtotal;}
   if(res.subtotal&&res.vat&&!res.total)res.total=res.subtotal+res.vat;
   if(!res.subtotal&&res.total&&res.vat)res.subtotal=res.total-res.vat;
@@ -1025,7 +1026,7 @@ function renderModal(){const md=$("#modal");const open=S.modal||S.fedit||S.scanE
   const log=[...S.log].sort((a,b)=>(b.at||"").localeCompare(a.at||"")).slice(0,25);
   const rc={"Đã lưu":"ok","Đã ký":"ok","Trùng":"warn","Chứng từ khác":"neu","Không đọc":"warn","Lỗi":"bad"};
   setHTML($("#modalBox"),`<div class="row"><span class="ttl grow" style="font-size:16px">📥 Tải chứng từ</span><button class="b" data-a="closeUp">Đóng</button></div>
-  <div class="panel"><div class="drop" id="drop" tabindex="0" role="button" aria-label="Chọn file hóa đơn"><b>Kéo thả hoặc bấm để chọn file PDF / ảnh / XML hóa đơn điện tử</b><br>Mỗi file một bộ chứng từ. App tự đọc hóa đơn, tự xếp vào đúng tháng theo ngày hóa đơn. Có ĐNC đã ký: lưu thẳng thành Đã ký. Chỉ có hóa đơn: tạo ĐNC để in ký. File chỉ có ĐNC đã ký: tự gắn vào ĐNC đang chờ ký.</div>
+  <div class="panel"><div class="drop" id="drop" tabindex="0" role="button" aria-label="Chọn file hóa đơn"><b>Kéo thả hoặc bấm để chọn file PDF / ảnh / XML hóa đơn điện tử</b><br>Mỗi file một bộ chứng từ. App tự đọc hóa đơn, tự xếp vào đúng tháng theo kỳ chi phí ghi trong nội dung hóa đơn. Có ĐNC đã ký: lưu thẳng thành Đã ký. Chỉ có hóa đơn: tạo ĐNC để in ký. File chỉ có ĐNC đã ký: tự gắn vào ĐNC đang chờ ký.</div>
    <input type="file" id="file" accept="application/pdf,image/jpeg,image/png,.xml,text/xml,application/xml" multiple hidden>
    
    ${S.queue.map(q=>`<div class="row"><span class="pill ${rc[q.state]||"neu"}">${esc(q.state)}</span><span class="grow">${esc(q.name)}</span>${q.err?`<span class="k">${esc(q.err)}</span>`:""}${q.skipped?`<button class="b sm" data-a="dq" data-id="${q.id}">Bỏ</button>`:""}</div>`).join("")}</div>
@@ -1356,8 +1357,8 @@ function formSummary(f){if(["quy_rap","quy_fb","float","du_thieu"].includes(f.ty
   if(f.type==="tich_truoc"){const[p]=ttTotals(f);return`<b>${fmt(p)}</b> đ trước VAT · ${f.rows.length} dòng`;}return"";}
 function vScanList(mod){const m=curYM();const list=S.scans.filter(x=>modOf(x)===mod&&x.month===m).sort((a,b)=>(b.at||"").localeCompare(a.at||""));
   if(!list.some(x=>x.id===S.selScan))S.selScan=list[0]?.id||null;const sel=list.find(x=>x.id===S.selScan);const pi=Math.min(S.arcPage,Math.max((sel?.file?.pages||[]).length-1,0));
-  return`<div class="split"><div class="panel"><span class="ttl">Bản scan tháng ${ymLbl(m)} · ${list.length}</span><div class="dlist">${list.length?list.map(x=>`<div class="ditem" data-a="selScan" data-id="${x.id}" aria-current="${x.id===S.selScan}" tabindex="0"><div class="row"><b class="grow">${esc(x.type)}</b><span class="k">${(x.file?.pages||[]).length} trang</span></div><div class="k">${esc(x.file?.name||"")} · ${esc(fdate(x.date))}${x.linkLabel?" · gắn: "+esc(x.linkLabel):""}</div>${x.note?`<div class="k">${esc(x.note)}</div>`:""}</div>`).join(""):`<div class="empty">Chưa có bản scan. Bấm "Tải bản scan".</div>`}</div></div>
-   <div class="panel">${sel?`<div class="row"><span class="ttl grow">${esc(sel.type)}</span><button class="b sm" data-a="pdfScan" data-id="${sel.id}">⬇ Xuất PDF</button><button class="b sm" data-a="printScan" data-id="${sel.id}">🖨 In bản scan</button>${sel.file?.url?`<a href="${esc(sel.file.url)}" target="_blank" rel="noopener">Mở file gốc</a>`:""}</div>${pagesViewer(sel.file?.pages||[],pi)}`:`<div class="empty">Chọn bản scan để xem.</div>`}</div></div>`;}
+  return`<div class="split"><div class="panel"><span class="ttl">Bản scan tháng ${ymLbl(m)} · ${list.length}</span><div class="dlist">${list.length?list.map(x=>`<div class="ditem" data-a="selScan" data-id="${x.id}" aria-current="${x.id===S.selScan}" tabindex="0"><div class="row"><b class="grow">${esc(x.type)}</b><span class="k">${(x.file?.pages||[]).length} trang</span></div><div class="k">${esc(x.file?.name||"")} · ${esc(fdate(x.date))}${x.linkLabel?" · gắn: "+esc(x.linkLabel):""}</div>${x.ftype?`<div class="k">${esc(FT[x.ftype]?.name||"")} · ${x.signed2?`<span class="pill ok">Đã ký</span>`:`<span class="pill warn">Chưa đủ 2 chữ ký</span>`}</div>`:modOf(x)==="kk"&&x.type==="Biên bản kiểm kê đã ký"?`<div class="k"><span class="pill warn">Chưa nhận diện – chưa tính vào checklist</span></div>`:""}${x.note?`<div class="k">${esc(x.note)}</div>`:""}</div>`).join(""):`<div class="empty">Chưa có bản scan. Bấm "Tải bản scan".</div>`}</div></div>
+   <div class="panel">${sel?`<div class="row"><span class="ttl grow">${esc(sel.type)}</span><button class="b sm" data-a="pdfScan" data-id="${sel.id}">⬇ Xuất PDF</button><button class="b sm" data-a="printScan" data-id="${sel.id}">🖨 In bản scan</button>${mod==="kk"&&sel.type!==SV_TYPE&&sel.file?.url?`<button class="b sm" data-a="kkRecog" data-id="${sel.id}">🔍 ${sel.ftype?"Nhận diện lại":"Nhận diện biên bản"}</button>`:""}${sel.file?.url?`<a href="${esc(sel.file.url)}" target="_blank" rel="noopener">Mở file gốc</a>`:""}</div>${pagesViewer(sel.file?.pages||[],pi)}`:`<div class="empty">Chọn bản scan để xem.</div>`}</div></div>`;}
 function pagesViewer(pages,pi){return pages.length?`<div class="viewer"><div class="strip">${pages.map((p,i)=>`<button data-a="arcPage" data-k="${i}" aria-current="${i===pi}"><img src="${esc(p)}" alt="Trang ${i+1}"><span>${i+1}</span></button>`).join("")}</div><div class="page"><img src="${esc(pages[pi])}" alt="Trang ${pi+1}"></div></div>`:`<div class="empty">Không có trang ảnh.</div>`;}
 
 /* ---------- Lập / sửa biên bản ---------- */
@@ -1416,8 +1417,8 @@ async function saveForm(){const f=S.fedit;if(!f)return;f.month=f.date.slice(0,7)
   await Store.put("forms",f.id,f);S.selForm=f.id;S.fedit=null;setYM(f.month);toast("Đã lưu "+FT[f.type].name+".");render();}
 
 /* ---------- Kiểm kê: kế hoạch định kỳ + báo cáo Vista ---------- */
-const KK_DEF={start:"2026-10",quy_rap:{mid:1,end:1},quy_fb:{mid:1,end:1},float:{mid:1,end:1},voucher:{mid:1,end:1},dong_phuc:{mid:0,end:1,months:""},fb_dem:{mid:1,end:1},fb_dc:{mid:1,end:1},du_thieu:{mid:0,end:0}};
-const kkPlan=()=>Object.assign(clone(KK_DEF),(S.settings||{}).kkPlan||{});
+const KK_DEF={v:2,start:"2026-01",quy_rap:{mid:1,end:1},quy_fb:{mid:1,end:1},float:{mid:1,end:1},voucher:{mid:1,end:1},dong_phuc:{mid:1,end:1,months:""},fb_dem:{mid:1,end:1},fb_dc:{mid:1,end:1},du_thieu:{mid:0,end:0}};
+const kkPlan=()=>{const sp=(S.settings||{}).kkPlan||{};const p=Object.assign(clone(KK_DEF),sp);if(!(sp.v>=2)){p.v=2;p.start=KK_DEF.start;p.dong_phuc=clone(KK_DEF.dong_phuc);}return p;};
 const pad2=n=>String(n).padStart(2,"0");
 function addDays(d,n){const x=new Date(+d.slice(0,4),+d.slice(5,7)-1,+d.slice(8,10)+n);return`${x.getFullYear()}-${pad2(x.getMonth()+1)}-${pad2(x.getDate())}`;}
 function kyDates(ym){const l=new Date(+ym.slice(0,4),+ym.slice(5),0).getDate();return{mid:`${ym}-15`,end:`${ym}-${pad2(l)}`};}
@@ -1427,23 +1428,27 @@ function inPlan(p,ym,k){if(!p||!p[k])return false;const ms=String(p.months||"").
 const FRANK={signed:3,printed:2,draft:1};
 function kyForm(type,ym,k){let best=null;S.forms.forEach(f=>{if(f.type!==type)return;const o=kyOf(f.date);if(!o||o.ym!==ym||o.k!==k)return;if(!best||FRANK[f.status]>FRANK[best.status])best=f;});return best;}
 function kySv(ym,k){return S.scans.filter(x=>{if(!x.sv)return false;const o=kyOf(x.date);return o&&o.ym===ym&&o.k===k;}).sort((a,b)=>(b.at||"").localeCompare(a.at||""))[0];}
-function kyState(type,ym,k,P){const f=kyForm(type,ym,k);const d=kyDates(ym)[k];const t=today();
-  if(f)return{f,lv:FST[f.status][1],lbl:FST[f.status][0],sym:f.status==="signed"?"✓":"◐"};
+function kyScan(type,ym,k){return S.scans.filter(x=>{if(x.ftype!==type)return false;const o=kyOf(x.date);return o&&o.ym===ym&&o.k===k;}).sort((a,b)=>(b.signed2?1:0)-(a.signed2?1:0)||(b.at||"").localeCompare(a.at||""))[0];}
+function kyState(type,ym,k,P){const f=kyForm(type,ym,k);const d=kyDates(ym)[k];const t=today();const sc=kyScan(type,ym,k);
+  if(f&&f.status==="signed")return{f,sc,lv:"ok",lbl:"Đã ký",sym:"✓"};
+  if(sc&&sc.signed2)return{f,sc,lv:"ok",lbl:"Đã ký (bản scan)",sym:"✓"};
+  if(sc)return{f,sc,lv:"inf",lbl:"Có bản scan, chưa đủ 2 chữ ký",sym:"◐"};
+  if(f)return{f,lv:FST[f.status][1],lbl:FST[f.status][0],sym:"◐"};
   if(ym<(P.start||"0000"))return{lv:"",lbl:"Chưa theo dõi trên app",sym:"–"};
   if(t>addDays(d,3))return{lv:"bad",lbl:"Thiếu",sym:"✕"};if(t>=addDays(d,-2))return{lv:"warn",lbl:"Đến hạn",sym:"!"};return{lv:"neu",lbl:"Chưa đến kỳ",sym:"·"};}
 function vKkPlan(){const ym=curYM(),y=ym.slice(0,4),P=kkPlan(),D=kyDates(ym),t=today();
   const kk=Object.keys(FT).filter(x=>FT[x].mod==="kk");
-  const card=k=>{const types=kk.filter(x=>inPlan(P[x],ym,k));const st=types.map(x=>[x,kyState(x,ym,k,P)]);const done=st.filter(([,s])=>s.f&&s.f.status==="signed").length;
+  const card=k=>{const types=kk.filter(x=>inPlan(P[x],ym,k));const st=types.map(x=>[x,kyState(x,ym,k,P)]);const done=st.filter(([,s])=>s.sym==="✓").length;
     const sv=kySv(ym,k);const d=D[k];const dd=Math.round((new Date(d+"T00:00:00")-new Date(t+"T00:00:00"))/864e5);
     const extra=S.forms.filter(f=>modOf(f)==="kk"&&!types.includes(f.type)&&(()=>{const o=kyOf(f.date);return o&&o.ym===ym&&o.k===k})());
     return`<div class="panel"><div class="row"><span class="ttl grow">${kyLbl(k)} · ${fdate(d)}</span><span class="pill ${types.length&&done===types.length?"ok":st.some(([,s])=>s.lv==="bad")?"bad":"neu"}">${done}/${types.length} đã ký</span></div>
      <div class="k">${dd>0?`Còn ${dd} ngày đến kỳ`:dd===0?"Hôm nay là ngày kiểm kê":`Kỳ đã qua ${-dd} ngày`}</div>
      <table class="t"><tbody>${st.map(([x,s])=>`<tr><td><span class="k">${esc(FT[x].grp)}</span><br><b>${esc(FT[x].name)}</b>${x==="fb_dem"||x==="fb_dc"?`<div class="k">${sv?`Báo cáo Vista: ${esc(sv.note||"")}`:"Chưa có báo cáo Vista của kỳ này"}</div>`:""}</td>
        <td style="width:130px">${s.lv?`<span class="pill ${s.lv}">${s.lbl}</span>`:`<span class="k">${s.lbl}</span>`}${s.f?`<div class="k">Ngày ${fdate(s.f.date)}</div>`:""}</td>
-       <td class="n" style="width:190px">${s.f?`<button class="b sm" data-a="kkView" data-id="${s.f.id}">Xem</button>`:(x==="fb_dem"||x==="fb_dc")&&sv?`<button class="b sm p" data-a="kkSv" data-k="${x}" data-id="${sv.id}">＋ Lập từ báo cáo Vista</button>`:`<button class="b sm" data-a="kkNew" data-k="${x}" data-d="${d}">＋ Lập</button>`}</td></tr>`).join("")||`<tr><td class="empty">Kỳ này không có biên bản nào trong kế hoạch.</td></tr>`}</tbody></table>
+       <td class="n" style="width:190px">${s.sc?`<button class="b sm" data-a="kkScanGo" data-id="${s.sc.id}">Xem scan</button> `:""}${s.f?`<button class="b sm" data-a="kkView" data-id="${s.f.id}">Xem</button>`:s.sc?"":(x==="fb_dem"||x==="fb_dc")&&sv?`<button class="b sm p" data-a="kkSv" data-k="${x}" data-id="${sv.id}">＋ Lập từ báo cáo Vista</button>`:`<button class="b sm" data-a="kkNew" data-k="${x}" data-d="${d}">＋ Lập</button>`}</td></tr>`).join("")||`<tr><td class="empty">Kỳ này không có biên bản nào trong kế hoạch.</td></tr>`}</tbody></table>
      ${extra.length?`<div class="k">Phát sinh ngoài kế hoạch: ${extra.map(f=>`<a href="#" data-a="kkView" data-id="${f.id}">${esc(FT[f.type].name)} ${fdate(f.date)}</a>`).join(", ")}</div>`:""}</div>`;};
   const rows=kk.filter(x=>P[x]&&(P[x].mid||P[x].end));
-  const cell=(x,m,k)=>{const ymm=`${y}-${pad2(m)}`;if(!inPlan(P[x],ymm,k))return`<span class="mk"></span>`;const s=kyState(x,ymm,k,P);const tl=`${esc(FT[x].name)} · ${fdate(kyDates(ymm)[k])}: ${esc(s.lbl)}`;return s.f?`<button class="mk ${s.lv}" data-a="kkView" data-id="${s.f.id}" title="${tl} – bấm để mở biên bản">${s.sym}</button>`:`<span class="mk ${s.lv}" title="${tl}">${s.sym}</span>`;};
+  const cell=(x,m,k)=>{const ymm=`${y}-${pad2(m)}`;if(!inPlan(P[x],ymm,k))return`<span class="mk"></span>`;const s=kyState(x,ymm,k,P);const tl=`${esc(FT[x].name)} · ${fdate(kyDates(ymm)[k])}: ${esc(s.lbl)}`;return s.f?`<button class="mk ${s.lv}" data-a="kkView" data-id="${s.f.id}" title="${tl} – bấm để mở biên bản">${s.sym}</button>`:s.sc?`<button class="mk ${s.lv}" data-a="kkScanGo" data-id="${s.sc.id}" title="${tl} – bấm để mở bản scan">${s.sym}</button>`:`<span class="mk ${s.lv}" title="${tl}">${s.sym}</span>`;};
   const pe=S.planEdit;
   const editor=pe?`<div class="panel"><div class="row"><span class="ttl grow">Sửa kế hoạch kiểm kê định kỳ</span><button class="b" data-a="planCancel">Hủy</button><button class="b p" data-a="planSave">Lưu kế hoạch</button></div>
     <table class="t"><thead><tr><th>Biên bản</th><th class="c">Kỳ ngày 15</th><th class="c">Kỳ cuối tháng</th><th>Chỉ làm vào các tháng (để trống = mọi tháng)</th></tr></thead><tbody>
@@ -1620,8 +1625,62 @@ async function printScan(sc){let pages=sc?.file?.pages||[];if(!pages.length){toa
   if(DEMO){toast("Bản xem trước trong Claude không mở được hộp thoại in. Trên Vercel nút này in toàn bộ trang scan.","inf");return;}
   Promise.all([...$("#printArea").querySelectorAll("img")].map(i=>i.decode().catch(()=>{}))).then(()=>window.print());}
 
+/* ---------- Kiểm kê: nhận diện bản scan biên bản (loại, ngày, chữ ký) ---------- */
+const KK_RX=[["dong_phuc",/dong phuc/],["fb_dc",/dieu chinh hang ton/],["fb_dem",/kiem dem thuc te/],["voucher",/voucher/],["float",/float/],["du_thieu",/du\s*\/?\s*thieu/],["quy_fb",/quy\s*f\s*&?\s*b|f\s*&\s*b\s*tien mat/],["quy_rap",/kiem quy tien mat|kiem quy/]];
+function rotC(c,deg){if(!deg)return c;const t=document.createElement("canvas");const sw=deg%180!==0;t.width=sw?c.height:c.width;t.height=sw?c.width:c.height;const g=t.getContext("2d");g.translate(t.width/2,t.height/2);g.rotate(deg*Math.PI/180);g.drawImage(c,-c.width/2,-c.height/2);return t;}
+function scaleC(c,w){if(c.width<=w)return c;const t=document.createElement("canvas");t.width=w;t.height=Math.round(c.height*w/c.width);t.getContext("2d").drawImage(c,0,0,t.width,t.height);return t;}
+/* dò mực ký (xanh/tím) trên trang: gom các vệt mực lớn đứng gần nhau thành 1 người ký */
+function sigDetect(c0){const c=scaleC(c0,900);const W=c.width,H=c.height;const d=c.getContext("2d").getImageData(0,0,W,H).data;const G=6,gw=Math.ceil(W/G),gh=Math.ceil(H/G);const cell=new Uint16Array(gw*gh);let colorPx=0;
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=(y*W+x)*4,r=d[i],g=d[i+1],b=d[i+2];if(Math.abs(b-r)>30||Math.abs(g-r)>30)colorPx++;if(b>90&&b-r>35&&b-g>12&&r<170)cell[(y/G|0)*gw+(x/G|0)]++;}
+  if(colorPx<W*H*0.0005)return{color:false,n:0};
+  const on=cell.map(v=>v>=3?1:0);const seen=new Uint8Array(gw*gh);const comps=[];
+  for(let i=0;i<on.length;i++){if(!on[i]||seen[i])continue;const st=[i];seen[i]=1;let x0=1e9,x1=-1,y0=1e9,y1=-1,n=0;
+    while(st.length){const j=st.pop();n++;const x=j%gw,y=j/gw|0;x0=Math.min(x0,x);x1=Math.max(x1,x);y0=Math.min(y0,y);y1=Math.max(y1,y);
+      for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++){const xx=x+dx,yy=y+dy;if(xx<0||yy<0||xx>=gw||yy>=gh)continue;const k=yy*gw+xx;if(on[k]&&!seen[k]){seen[k]=1;st.push(k);}}}
+    const span=Math.max(x1-x0,y1-y0)*G;if(n>=8&&span>=Math.max(W,H)*0.06)comps.push({cx:(x0+x1)/2*G,cy:(y0+y1)/2*G,span});}
+  const gr=[];const lim=Math.max(W,H)*0.13;comps.forEach(o=>{const g=gr.find(g=>Math.hypot(g.cx-o.cx,g.cy-o.cy)<lim);if(g){g.n++;}else gr.push({cx:o.cx,cy:o.cy,n:1});});
+  return{color:true,n:gr.length};}
+async function kkRecog(file,step){let cs;if(file.type==="application/pdf"||/\.pdf$/i.test(file.name||""))cs=await renderPdf(file,2.2);else cs=[await imgCanvas(file)];
+  step&&step("Đang tìm hướng trang…");const best={sc:-1};
+  for(const deg of [0,90,270,180]){const t=await ocrText(scaleC(rotC(cs[0],deg),1700));const n=OCRP.norm(t);const sc=(n.match(/bien ban|kiem|ngay|so luong|chu ky|ho ten|tien|rap|galaxy|thanh vien/g)||[]).length;if(sc>best.sc)Object.assign(best,{sc,deg,t:n});if(sc>=6)break;}
+  let type=null;for(const [k,rx] of KK_RX)if(rx.test(best.t)){type=k;break;}
+  let date="";const m1=best.t.match(/ngay\s*[:.]?\s*(\d{1,2})\s*[\/.-]\s*(\d{1,2})\s*[\/.-]\s*(20\d{2})/)||best.t.match(/(\d{1,2})\s*\/\s*(\d{1,2})\s*\/\s*(20\d{2})/);const m2=best.t.match(/ngay\s*(\d{1,2})\s*thang\s*(\d{1,2})\s*nam\s*(20\d{2})/);const mm=m1||m2;
+  if(mm&&+mm[2]>=1&&+mm[2]<=12&&+mm[1]>=1&&+mm[1]<=31)date=`${mm[3]}-${pad2(mm[2])}-${pad2(mm[1])}`;
+  step&&step("Đang dò chữ ký…");const bot=c=>{const t=document.createElement("canvas");t.width=c.width;t.height=Math.round(c.height*.45);t.getContext("2d").drawImage(c,0,c.height-t.height,c.width,t.height,0,0,c.width,t.height);return t;};const sigs=cs.map(c=>sigDetect(bot(rotC(c,best.deg))));const sig={color:sigs.some(x=>x.color),n:Math.max(0,...sigs.map(x=>x.n))};
+  return{type,date,sig,pages:cs.map(c=>thumb(rotC(c,best.deg))),deg:best.deg};}
+function kkRevCard(r,i){const o=kyOf(r.date);const f=r.type&&o?kyForm(r.type,o.ym,o.k):null;
+  const sigTxt=!r.sig.color?"Scan đen trắng, không dò được chữ ký – kiểm tra bằng mắt":r.sig.n>=2?`Dò thấy ${r.sig.n} chữ ký (mực màu)`:`Chỉ dò thấy ${r.sig.n} chữ ký`;
+  return`<div class="panel" style="border:1px solid var(--line)"><div class="row"><b class="grow">${esc(r.name)}</b>${r.err?`<span class="pill bad">${esc(r.err)}</span>`:""}</div>
+   <div class="row" style="align-items:flex-start;gap:12px">${r.pages[0]?`<img src="${esc(r.pages[0])}" alt="" style="width:150px;border:1px solid var(--line);border-radius:6px">`:""}
+   <div class="grow"><div class="grid"><label class="f">Loại biên bản<select data-r="${i}" data-rf="type"><option value="">Không nhận ra – lưu như chứng từ khác</option>${Object.keys(FT).filter(x=>FT[x].mod==="kk").map(x=>`<option value="${x}" ${x===r.type?"selected":""}>${esc(FT[x].name)}</option>`).join("")}</select></label>
+    <label class="f">Ngày trên biên bản<input type="date" data-r="${i}" data-rf="date" value="${esc(r.date||"")}"></label>
+    <label class="f">Kỳ<input disabled value="${o?esc(kyLbl(o.k)+" "+ymLbl(o.ym)):"Ngày không thuộc kỳ 15 / cuối tháng"}"></label></div>
+    <div class="k">${f?`Gắn với biên bản lập trên app: ${esc(FT[f.type].name)} ${fdate(f.date)} (${esc(FST[f.status][0])})`:r.type&&o?"Chưa có biên bản lập trên app cho kỳ này – bản scan sẽ được tính là biên bản của kỳ.":""}</div>
+    <div class="msg ${!r.sig.color?"warn":r.sig.n>=2?"ok":"warn"}" style="margin:6px 0">${sigTxt}.</div>
+    <label class="row" style="gap:6px"><input type="checkbox" data-r="${i}" data-rf="ok2" ${r.ok2?"checked":""}> <b>Đã đủ 2 chữ ký</b> (người kiểm kê và người chứng kiến). Chỉ khi tick mới tính là Đã ký.</label>
+    <div class="row" style="margin-top:8px"><button class="b p" data-a="kkRevSave" data-k="${i}" ${r.busy?"disabled":""}>Lưu bản scan</button><button class="b" data-a="kkRevDrop" data-k="${i}">Bỏ</button></div></div></div></div>`;}
+async function kkScanFiles(files,scanId){const sc=S.scanEdit;if(!sc)return;sc.rev=sc.rev||[];
+  for(const file of files){const r={name:file.name,file,scanId:scanId||"",type:null,date:"",sig:{color:false,n:0},pages:[],ok2:false};
+    try{const hash=await fileHash(file);r.hash=hash;const ex=!scanId&&hash&&S.scans.find(x=>x.fileHash===hash);if(ex){sc.msg=`${file.name}: đã có trong lưu trữ tháng ${ymLbl(ex.month)}. Mở bản scan đó và bấm "Nhận diện biên bản" nếu cần.`;sc.err=true;renderModal();bind();continue;}
+      sc.msg=`Đang quét ${file.name}…`;sc.err=false;renderModal();bind();
+      Object.assign(r,await kkRecog(file,t=>{sc.msg=`${file.name}: ${t}`;renderModal();bind();}));r.ok2=r.sig.color&&r.sig.n>=2;sc.rev.push(r);sc.msg="";}
+    catch(e){sc.msg=`${file.name}: không quét được (${e.message||e}).`;sc.err=true;}renderModal();bind();}}
+async function kkRevSave(i){const sc=S.scanEdit;const r=sc.rev[i];if(!r)return;r.busy=true;renderModal();bind();
+  try{const o=kyOf(r.date);const f=r.type&&o?kyForm(r.type,o.ym,o.k):null;const mon=o?o.ym:(r.date||curYM()).slice(0,7);
+    let url=r.url;if(!r.scanId){url=await storeFile(r.file,mon+"/scan");}
+    const rec={mod:"kk",type:r.type?"Biên bản kiểm kê đã ký":"Chứng từ khác",ftype:r.type||"",date:r.date||"",month:mon,note:r.type?FT[r.type].name:"",linkId:f?f.id:"",linkLabel:f?FT[f.type].name:"",sig:r.sig,signed2:!!(r.type&&r.ok2),at:nowIso()};
+    if(r.scanId){const old=S.scans.find(x=>x.id===r.scanId);await Store.put("scans",r.scanId,Object.assign({},old,rec,{file:Object.assign({},old.file,{pages:r.pages.length?r.pages:old.file.pages})}));}
+    else await Store.put("scans","s_"+uid(),Object.assign(rec,{file:{name:r.name,url,pages:r.pages},fileHash:r.hash}));
+    if(f)await Store.put("forms",f.id,Object.assign({},f,{status:rec.signed2?"signed":(f.status==="signed"?"signed":"printed")}));
+    sc.rev.splice(i,1);sc.msg=`Đã lưu ${r.name}${r.type?` · ${FT[r.type].name} ${fdate(r.date)} · ${rec.signed2?"Đã ký":"chờ đủ chữ ký"}`:""} vào tháng ${ymLbl(mon)}.`;sc.err=false;sc.goto=mon;}
+  catch(e){r.busy=false;sc.msg="Không lưu được: "+(e.message||e);sc.err=true;}renderModal();bind();}
 /* ---------- Tải bản scan ---------- */
 function scanEditor(){const sc=S.scanEdit;if(!sc)return"";const m=sc.month||curYM();
+  if(sc.mod==="kk"&&sc.type==="Biên bản kiểm kê đã ký")return`<div class="row"><span class="ttl grow" style="font-size:16px">📎 Tải bản scan biên bản kiểm kê</span><button class="b" data-a="closeScan">Đóng</button></div>
+   <div class="panel"><div class="grid"><label class="f">Loại chứng từ<select data-s="type">${SCAN_TYPES.kk.map(t=>`<option ${t===sc.type?"selected":""}>${esc(t)}</option>`).join("")}</select></label></div>
+   <div class="drop" id="scanDrop" tabindex="0" role="button"><b>Kéo thả hoặc bấm để chọn bản scan biên bản đã ký</b><br>App tự quét loại biên bản, ngày, xếp vào đúng kỳ và dò chữ ký. Kiểm tra lại rồi bấm Lưu.</div><input type="file" id="scanFile" accept="application/pdf,image/*" multiple hidden>
+   ${sc.msg?`<div class="msg ${sc.err?"bad":"inf"} row"><span class="grow">${esc(sc.msg)}</span>${sc.goto?`<button class="b sm" data-a="scanGoto">Xem trong lưu trữ</button>`:""}</div>`:""}</div>
+   ${(sc.rev||[]).map(kkRevCard).join("")}`;
   const nccs=[...new Set(S.inv.map(i=>i.seller?.name).concat((S.settings?.banks||[]).map(b=>b.ten)).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"vi"));
   const links=sc.mod==="dnc"?S.dnc.filter(d=>d.month===m).map(d=>[d.id,`ĐNC ${d.ifc} · ${bankBy(d.payeeKey)?.ten||""} · ${ST[d.status][0]}`]).concat(S.inv.filter(i=>i.status==="confirmed"&&i.month===m).map(i=>["inv:"+i.id,`HĐ ${i.number} · ${i.seller?.name}`]))
     :S.forms.filter(f=>modOf(f)===sc.mod&&f.month===m).map(f=>[f.id,`${FT[f.type].name} ${fdate(f.date)}`]);
@@ -1718,7 +1777,7 @@ function bind(){setTimeout(hbars,0);setTimeout(hydrateImgs,0);
   const tf=$("#tplf");if(tf)tf.onchange=()=>{if(tf.files[0])readTpl(tf.files[0]);tf.value="";};
   const sf=$("#signFile");if(sf)sf.onchange=()=>{if(sf.files[0])uploadSigned(sf.dataset.id,sf.files[0]);sf.value="";};
   const hz=$("#hideZero");if(hz)hz.onchange=()=>{S.hideZero=hz.checked;render();};
-  const sd=$("#scanDrop"),sfi=$("#scanFile");if(sd){sd.onclick=()=>sfi.click();sd.ondragover=e=>{e.preventDefault();sd.classList.add("on")};sd.ondragleave=()=>sd.classList.remove("on");sd.ondrop=e=>{e.preventDefault();saveScans([...e.dataTransfer.files]);};sfi.onchange=()=>{saveScans([...sfi.files]);sfi.value="";};}
+  const sd=$("#scanDrop"),sfi=$("#scanFile");if(sd){sd.onclick=()=>sfi.click();sd.ondragover=e=>{e.preventDefault();sd.classList.add("on")};sd.ondragleave=()=>sd.classList.remove("on");const go=fs=>{const sc=S.scanEdit;if(sc&&sc.mod==="kk"&&sc.type==="Biên bản kiểm kê đã ký")kkScanFiles(fs);else saveScans(fs);};sd.ondrop=e=>{e.preventDefault();go([...e.dataTransfer.files]);};sfi.onchange=()=>{go([...sfi.files]);sfi.value="";};}
   const svf=$("#svFile");if(svf)svf.onchange=()=>{if(svf.files[0])svImport(svf.files[0]);svf.value="";};
   const nk=$("#newKk");if(nk)nk.onchange=()=>{if(nk.value){S.fedit=blankForm(nk.value);render();}};
   const sfm=$("#setForm");if(sfm){sfm.onsubmit=e=>{e.preventDefault();const a=(CFG.accounts||[]).find(x=>x.rap===S.rap);if(a&&$("#setPwd").value===a.pwd){S.setOk=true;S.setErr=false;}else S.setErr=true;render();if(!S.setOk)setTimeout(()=>$("#setPwd")&&$("#setPwd").focus(),0);};}
@@ -1730,6 +1789,7 @@ document.addEventListener("change",e=>{const pe=e.target.closest("[data-pe]");if
     if(S.fedit.type==="fb_dc"&&/rows\.\d+\.ma$/.test(ff.dataset.f)){const i=+ff.dataset.f.split(".")[1];const it=FB_ITEMS.find(x=>x[0]===v);if(it){S.fedit.rows[i].ten=it[1];S.fedit.rows[i].dvt=it[2];}}
     if(S.fedit.type==="tich_truoc"&&/rows\.\d+\.vendor$/.test(ff.dataset.f)){const i=+ff.dataset.f.split(".")[1];const vv=S.byNo.get(String(v).trim());if(vv)S.fedit.rows[i].vname=vv[1];}
     const md=$("#modal"),y=md.scrollTop;renderModal();bind();md.scrollTop=y;return;}
+  const rr=e.target.closest("[data-r]");if(rr&&S.scanEdit?.rev){const r=S.scanEdit.rev[+rr.dataset.r];if(r){const k=rr.dataset.rf;r[k]=rr.type==="checkbox"?rr.checked:rr.value;if(k==="type"&&!rr.value)r.ok2=false;renderModal();bind();}return;}
   const ss=e.target.closest("[data-s]");if(ss&&S.scanEdit){S.scanEdit[ss.dataset.s]=ss.value;if(ss.dataset.s==="month"&&ss.value){S.scanEdit.linkId="";if(S.scanEdit.date&&!S.scanEdit.date.startsWith(ss.value))S.scanEdit.date="";renderModal();bind();}return;}
   const el=e.target.closest("[data-e]");if(!el)return;const d=S.edit.get(el.dataset.id);if(!d)return;const k=el.dataset.e;
   let v=el.dataset.b?el.checked:el.value;if(el.dataset.n)v=k.endsWith("vatRate")?(String(v).trim()===""?null:num(v)):Math.round(num(v));if(k==="seller.mst")v=mstN(v);
@@ -1749,7 +1809,7 @@ document.addEventListener("click",async e=>{const b=e.target.closest("[data-a]")
   else if(a==="dcSv"){const sc=S.scans.find(x=>x.id===b.dataset.k);if(sc){dcFromSv(S.fedit,sc);renderModal();bind();}}
   else if(a==="planEdit"){S.planEdit=kkPlan();render();}
   else if(a==="planCancel"){S.planEdit=null;render();}
-  else if(a==="planSave"){const st=clone(S.settings||{});st.kkPlan=S.planEdit;await Store.setSettings(st);await Store.addHist({at:nowIso(),summary:"Sửa kế hoạch kiểm kê định kỳ"});S.planEdit=null;toast("Đã lưu kế hoạch kiểm kê.");render();}
+  else if(a==="planSave"){const st=clone(S.settings||{});st.kkPlan=Object.assign({},S.planEdit,{v:2});await Store.setSettings(st);await Store.addHist({at:nowIso(),summary:"Sửa kế hoạch kiểm kê định kỳ"});S.planEdit=null;toast("Đã lưu kế hoạch kiểm kê.");render();}
   else if(a==="ttImp"){$("#ttFile").click();}
   else if(a==="ttGo"){$("#mon").value=b.dataset.k;S.msub.tt="month";render();}
   else if(a==="cashImp"){$("#cashFile").click();}
@@ -1779,6 +1839,11 @@ document.addEventListener("click",async e=>{const b=e.target.closest("[data-a]")
   else if(a==="openScan"){const m=curYM();S.scanEdit={mod:b.dataset.k,type:SCAN_TYPES[b.dataset.k][0],month:m,date:today().startsWith(m)?today():"",linkId:"",note:"",ncc:""};render();}
   else if(a==="closeScan"){S.scanEdit=null;render();}
   else if(a==="selScan"){S.selScan=id;S.arcPage=0;render();}
+  else if(a==="kkRevSave")kkRevSave(+b.dataset.k);
+  else if(a==="kkRevDrop"){S.scanEdit.rev.splice(+b.dataset.k,1);renderModal();bind();}
+  else if(a==="kkScanGo"){const x=S.scans.find(y=>y.id===id);if(x){$("#year").value=x.month.slice(0,4);$("#mon").value=String(+x.month.slice(5));S.msub.kk="scan";S.selScan=id;S.arcPage=0;render();}}
+  else if(a==="kkRecog"){const x=S.scans.find(y=>y.id===id);if(!x)return;S.scanEdit={mod:"kk",type:"Biên bản kiểm kê đã ký",month:x.month,rev:[],msg:"Đang tải file gốc…"};render();
+    try{const bl=await getFileBlob(x.file.url);const f=new File([bl],x.file.name||"scan.pdf",{type:bl.type||(/\.pdf$/i.test(x.file.name||"")?"application/pdf":"image/jpeg")});await kkScanFiles([f],x.id);}catch(e){S.scanEdit.msg="Không mở được file gốc: "+(e.message||e);S.scanEdit.err=true;renderModal();bind();}}
   else if(a==="kpImport"){$("#kpFile").click();}
   else if(a==="openUp"){S.modal=true;render();}
   else if(a==="closeUp"){S.modal=false;S.joinGid=null;render();}
