@@ -339,7 +339,7 @@ if(typeof module!=="undefined")module.exports=OCRP;
 (function(){
 "use strict";
 const CFG=window.APP_CONFIG||{};const DEMO=!CFG.firebase;
-const S={arcOpen:new Set(),openG:new Set(),dtab:{},rap:null,settings:null,inv:[],dnc:[],docs:[],log:[],hist:[],queue:[],edit:new Map(),ocr:new Map(),tab:"budget",sub:"list",selDnc:null,selArc:null,arcPage:0,arcView:"pages",
+const S={err:{inv:[],docs:[],scans:[]},errView:{},arcOpen:new Set(),openG:new Set(),dtab:{},rap:null,settings:null,inv:[],dnc:[],docs:[],log:[],hist:[],queue:[],edit:new Map(),ocr:new Map(),tab:"budget",sub:"list",selDnc:null,selArc:null,arcPage:0,arcView:"pages",
   arch:"",budgetSel:null,hideZero:true,pendingImport:null,arm:null,modal:false,vend:[],byMst:new Map(),byNo:new Map(),ifc:new Map(),fb:null,pageCache:new Map(),forms:[],scans:[],kp:[],cash:[],msub:{},planEdit:null,showNotes:false,selForm:null,fedit:null,scanEdit:null,selScan:null};
 const $=s=>document.querySelector(s);
 const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -428,7 +428,7 @@ const Store={
     await firebase.auth().signInAnonymously();
     const root=firebase.database().ref("ctr/"+S.rap);S.fb=root;const list=(k,v)=>Object.entries(v||{}).map(([id,o])=>fbFix(k,Object.assign({id},o)));
     root.child("settings").on("value",s=>{S.settings=fbFix("settings",s.val()||defSettings());render();},onErr);
-    let loaded=0;KINDS.forEach(k=>root.child(k).on("value",s=>{S[k]=list(k,s.val());if(++loaded===KINDS.length){S._loadedAll=true;seedOffer();}render();},onErr));
+    let loaded=0;KINDS.forEach(k=>root.child(k).on("value",s=>{S[k]=list(k,s.val());S.err[k]=[];if(++loaded===KINDS.length){S._loadedAll=true;seedOffer();}render();},onErr));
     root.child("hist").limitToLast(30).on("value",s=>{S.hist=list(s.val()).sort((a,b)=>(b.at||"").localeCompare(a.at||""));},onErr);
     firebase.database().ref(".info/connected").on("value",s=>{$("#stat").textContent=s.val()?"● Đã đồng bộ":"○ Mất kết nối, thay đổi sẽ gửi khi có mạng";});
   },
@@ -436,7 +436,7 @@ const Store={
     if(DEMO){const arr=S[kind];const i=arr.findIndex(x=>x.id===id);const o=Object.assign({id},body);if(i>=0)arr[i]=o;else arr.push(o);render();return;}
     if(["inv","docs","scans","dnc"].includes(kind))await imgOut(body);
     await S.fb.child(kind+"/"+id).set(body);},
-  async del(kind,id){if(DEMO){S[kind]=S[kind].filter(x=>x.id!==id);render();return;}await S.fb.child(kind+"/"+id).remove();},
+  async del(kind,id){if(DEMO){S[kind]=S[kind].filter(x=>x.id!==id);if(S.err[kind])S.err[kind]=S.err[kind].filter(x=>x.id!==id);render();return;}await S.fb.child(kind+"/"+id).remove();},
   async setSettings(o){if(DEMO){S.settings=clean(o);render();return;}await S.fb.child("settings").set(clean(o));},
   async addHist(o){const id=uid();if(DEMO){S.hist.unshift(Object.assign({id},o));return;}await S.fb.child("hist/"+id).set(clean(o));}
 };
@@ -945,7 +945,34 @@ async function kyFix(){const mv=S.inv.filter(i=>i.status==="confirmed"&&/^\d{4}-
   for(const d of S.dnc){const iv=S.inv.filter(i=>(d.invIds||[]).includes(i.id));const ks=[...new Set(iv.map(i=>i.ky).filter(Boolean))];
     if(ks.length===1&&d.month!==ks[0]){const o=Object.assign({},d);delete o.id;o.month=ks[0];o.key=dKey(ks[0],d.ifc,d.payeeKey,d.mst);await Store.put("dnc",d.id,o);}}
   toast(`Đã chuyển ${mv.length} hóa đơn về đúng tháng theo kỳ chi phí (${[...new Set(mv.map(i=>"HĐ "+i.number+" → "+ymLbl(i.ky)))].join(", ")}).`);}
-function render(){if($("#app").hidden)return;if(!S._kyFixed&&S.rap&&(DEMO||S._loadedAll)&&S.inv.length){S._kyFixed=true;setTimeout(()=>kyFix().catch(()=>{}),0);}(S.kp||[]).forEach(d=>{if(KP[d.id]!==d){KP[d.id]=d;_mcache.clear();}});const v=$("#view");const y=window.scrollY;
+/* Bản scan lỗi: tách khỏi dữ liệu chính để không tính vào checklist, lưu trữ, Kinh phí, ĐNC */
+function splitErr(){["inv","docs","scans"].forEach(k=>{const m=new Map();(S.err[k]||[]).forEach(x=>m.set(x.id,x));(S[k]||[]).forEach(x=>m.set(x.id,x));const all=[...m.values()];S[k]=all.filter(x=>!x.errAt);S.err[k]=all.filter(x=>x.errAt);});}
+const ERR_PWD="0000";
+async function toErr(kind,id){const o=S[kind].find(x=>x.id===id);if(!o)return;
+  if(kind==="inv"&&o.dncId){const dn=S.dnc.find(d=>d.id===o.dncId);if(dn){const own=dn.status==="signed"&&o.file?.url&&dn.signedUrl===o.file.url;
+      if(dn.status!=="open"&&!own){toast(`HĐ ${o.number} nằm trong ĐNC ${dn.ifc} đã ${dn.status==="printed"?"in":"ký"}. Cần xử lý ĐNC đó trước rồi mới chuyển vào bảng lỗi.`,"bad");return;}
+      const ids=(dn.invIds||[]).filter(x=>x!==id);if(ids.length)await Store.put("dnc",dn.id,Object.assign({},dn,{invIds:ids}));else await Store.del("dnc",dn.id);}}
+  if(kind==="scans"&&o.linkId){const f=S.forms.find(x=>x.id===o.linkId);if(f&&f.status==="signed"&&!S.scans.some(x=>x.id!==id&&x.linkId===f.id))await Store.put("forms",f.id,Object.assign({},f,{status:"printed"}));}
+  await Store.put(kind,id,Object.assign({},o,{errAt:nowIso(),errFromMonth:o.month||""}));await Store.addHist({at:nowIso(),summary:`Chuyển vào bảng lỗi: ${errName(kind,o)}`});
+  toast(`Đã chuyển ${errName(kind,o)} vào bảng lỗi.${kind==="inv"&&o.dncId?" Đã gỡ dòng khỏi ĐNC.":""}`);}
+function errName(kind,o){return kind==="inv"?`HĐ ${o.number} · ${o.seller?.name||""}`:kind==="docs"?`${o.type||"chứng từ"} ${o.number||""}`:`${o.file?.name||o.type||"bản scan"}`;}
+async function fromErr(kind,id){const o=S.err[kind].find(x=>x.id===id);if(!o)return;const n=Object.assign({},o);delete n.errAt;delete n.errFromMonth;
+  if(kind==="inv"){n.status="draft";delete n.dncId;n.createdAt=nowIso();}
+  await Store.put(kind,id,n);toast(kind==="inv"?`Đã khôi phục HĐ ${o.number} về Bản nháp đang chờ (trong cửa sổ Tải chứng từ) để xác nhận lại.`:`Đã khôi phục ${errName(kind,o)}.`);}
+async function delErr(kind,id){const o=S.err[kind].find(x=>x.id===id);if(!o)return;const url=o.file?.url||"";const pages=o.file?.pages||[];
+  const used=v=>[...S.inv,...S.docs,...S.scans,...S.err.inv,...S.err.docs,...S.err.scans].some(x=>x.id!==id&&(x.file?.url===v||(x.file?.pages||[]).includes(v)));
+  await Store.del(kind,id);
+  if(!DEMO&&S.fb){if(url.startsWith("fb:")&&!used(url))await S.fb.child("files/"+url.slice(3)).remove().catch(()=>{});for(const pg of pages)if(String(pg).startsWith("img:")&&!used(pg))await S.fb.child("img/"+pg.slice(4)).remove().catch(()=>{});}
+  await Store.addHist({at:nowIso(),summary:`Xóa hẳn khỏi bảng lỗi: ${errName(kind,o)}`});toast(`Đã xóa hẳn ${errName(kind,o)}.`);}
+function errList(mods){const rows=[];[["inv","dnc"],["docs","dnc"],["scans",null]].forEach(([k,md])=>(S.err[k]||[]).forEach(o=>{const mm=k==="scans"?modOf(o):md;if(mods.includes(mm))rows.push({k,o});}));return rows.sort((a,b)=>(b.o.errAt||"").localeCompare(a.o.errAt||""));}
+function vErr(mods){const rows=errList(mods);
+  return`<div class="panel"><span class="ttl">Bản scan lỗi · ${rows.length}</span><div class="k">Bản scan ở đây không tính vào lưu trữ, checklist, Kinh phí và ĐNC. Khôi phục nếu chuyển nhầm; xóa hẳn cần mật khẩu.</div>
+   ${rows.length?`<div class="scroll"><table class="t"><thead><tr><th></th><th>Chứng từ</th><th>Tháng gốc</th><th>Chuyển lúc</th><th></th></tr></thead><tbody>${rows.map(({k,o})=>{const pg=(o.file?.pages||[])[0];const key=k+":"+o.id;const pw=S.errView[key];
+     return`<tr><td style="width:70px">${pg?`<img src="${esc(pg)}" alt="" style="width:60px;border:1px solid var(--line);border-radius:4px">`:""}</td><td><b>${esc(errName(k,o))}</b><div class="k">${esc(k==="inv"?"Hóa đơn":o.type||"")}${o.total?" · "+fmt(o.total)+" đ":""}${o.file?.url?` · <a href="${esc(o.file.url)}" target="_blank" rel="noopener">Mở file</a>`:""}</div></td>
+      <td>${esc(o.errFromMonth?ymLbl(o.errFromMonth):"")}</td><td>${esc(dmy(o.errAt))} ${esc(String(o.errAt||"").slice(11,16))}</td>
+      <td class="n" style="white-space:nowrap"><button class="b sm" data-a="errBack" data-k="${k}" data-id="${o.id}">↩ Khôi phục</button> ${pw!==undefined?`<input type="password" inputmode="numeric" data-errpw="${esc(key)}" placeholder="Mật khẩu" value="${esc(pw)}" style="width:96px"> <button class="b sm d" data-a="errDel" data-k="${k}" data-id="${o.id}">Xóa hẳn</button> <button class="b sm" data-a="errPwX" data-k="${esc(key)}">Hủy</button>`:`<button class="b sm d" data-a="errPw" data-k="${esc(key)}">🗑 Xóa</button>`}</td></tr>`;}).join("")}</tbody></table></div>`:`<div class="empty">Chưa có bản scan nào trong bảng lỗi.</div>`}</div>`;}
+function errTabs(scope,n){const on=S.errView["_"+scope];return`<nav class="tabs small" style="margin-bottom:8px"><button data-a="errTab" data-k="${scope}" data-v="" aria-selected="${!on}">Lưu trữ</button><button data-a="errTab" data-k="${scope}" data-v="1" aria-selected="${!!on}">Bản scan lỗi (${n})</button></nav>`;}
+function render(){if($("#app").hidden)return;splitErr();if(!S._kyFixed&&S.rap&&(DEMO||S._loadedAll)&&S.inv.length){S._kyFixed=true;setTimeout(()=>kyFix().catch(()=>{}),0);}(S.kp||[]).forEach(d=>{if(KP[d.id]!==d){KP[d.id]=d;_mcache.clear();}});const v=$("#view");const y=window.scrollY;
   setHTML(v,S.tab==="budget"?vBudget():S.tab==="dnc"?vDncTab():S.tab==="tt"?vTT():vModule(S.tab));renderModal();bind();window.scrollTo(0,y);}
 function vDncTab(){
   const subs=[["list","Danh sách ĐNC"],["archive","Lưu trữ chứng từ"],["settings","Cài đặt"]];S.msub.dnc=S.sub;
@@ -988,6 +1015,7 @@ const NO_NCC="Chưa rõ nhà cung cấp";
 function arcGroups(list){const g=new Map();list.forEach(x=>{const k=(x.o.seller?.name||"").trim()||NO_NCC;if(!g.has(k))g.set(k,[]);g.get(k).push(x);});
   return[...g.entries()].sort((a,b)=>a[0]===NO_NCC?1:b[0]===NO_NCC?-1:a[0].localeCompare(b[0],"vi"));}
 function vArchive(){
+  const ne=errList(["dnc"]).length;if(S.errView._dnc)return errTabs("dnc",ne)+vErr(["dnc"]);
   const m=curYM();const list=arcItems(m);if(S.arch.trim())arcGroups(list).forEach(([g])=>S.arcOpen.add(g));
   if(!list.some(x=>x.o.id===S.selArc)){S.selArc=null;S.arcPage=0;S.arcView="pages";}
   const tot=list.filter(x=>x.kind==="inv").reduce((a,x)=>[a[0]+x.o.subtotal,a[1]+x.o.total],[0,0]);
@@ -999,13 +1027,13 @@ function vArchive(){
      <div class="k">${x.kind==="inv"?`HĐ ${esc(o.serial)} ${esc(o.numberRaw||o.number)} · ${esc(dmy(o.date))} · ${esc(o.cat)}`:`${esc(o.number)} · ${esc(dmy(o.date))}`}</div>
      <div class="row"><span class="num grow">${o.total?`<b>${fmt(o.total)}</b> đ`:`<span class="k">${esc(o.note||"")}</span>`}</span>${o.file?.pages?.length?`<span class="k">${o.file.pages.length} trang</span>`:`<span class="k">${esc(o.source||"")}</span>`}</div></div>`}).join(""))+`</div>`}).join(""):`<div class="empty">Chưa có chứng từ trong tháng này.</div>`}</div></div>`;
   const cur=list.find(x=>x.o.id===S.selArc);
-  return `<div class="split">${left}<div class="panel">${cur?arcDetail(cur):`<div class="empty">Bấm vào tên nhà cung cấp bên trái để mở danh sách chứng từ.</div>`}</div></div><input type="file" id="signFile" accept="application/pdf,image/*" hidden>`;}
+  return errTabs("dnc",ne)+`<div class="split">${left}<div class="panel">${cur?arcDetail(cur):`<div class="empty">Bấm vào tên nhà cung cấp bên trái để mở danh sách chứng từ.</div>`}</div></div><input type="file" id="signFile" accept="application/pdf,image/*" hidden>`;}
 function arcDetail(x){const o=x.o;const pages=o.file?.pages||[];S._arcPages=pages;S._arcFile=o.file;const types=o.pages||[];const dn=x.kind==="inv"?S.dnc.find(d=>d.id===o.dncId):null;
   const view=S.arcView;const pi=Math.min(S.arcPage,Math.max(pages.length-1,0));
   const tabs=`<nav class="tabs small"><button data-a="arcView" data-k="pages" aria-selected="${view==="pages"}">Bộ chứng từ (${pages.length} trang)</button>${x.kind==="inv"&&dn?`<button data-a="arcView" data-k="dnc" aria-selected="${view==="dnc"}">ĐNC đi kèm</button>`:""}<button data-a="arcView" data-k="info" aria-selected="${view==="info"}">Thông tin & kiểm tra</button></nav>`;
   let body="";
   if(view==="pages")body=pages.length?`<div class="viewer"><div class="strip">${pages.map((p,i)=>`<button data-a="arcPage" data-k="${i}" aria-current="${i===pi}" title="${esc(PAGE[types[i]?.type]||"")}"><img src="${esc(p)}" alt="Trang ${i+1}"><span>${i+1}. ${esc((PAGE[types[i]?.type]||"").split(" ")[0])}</span></button>`).join("")}</div>
-     <div><div class="row" style="margin-bottom:6px"><span class="ttl grow">Trang ${pi+1}/${pages.length} · ${esc(PAGE[types[pi]?.type]||"")}</span><button class="b sm" data-a="pdfArc">⬇ Xuất PDF</button><button class="b sm" data-a="printArc">🖨 In bản scan</button>${o.file?.url?`<a href="${esc(o.file.url)}" target="_blank" rel="noopener">Mở file PDF gốc</a>`:""}</div><div class="page"><img src="${esc(pages[pi])}" alt="Trang ${pi+1}"></div></div></div>`
+     <div><div class="row" style="margin-bottom:6px"><span class="ttl grow">Trang ${pi+1}/${pages.length} · ${esc(PAGE[types[pi]?.type]||"")}</span><button class="b sm" data-a="pdfArc">⬇ Xuất PDF</button><button class="b sm" data-a="printArc">🖨 In bản scan</button><button class="b sm d" data-a="toErr" data-k="${x.kind==="inv"?"inv":o.mod==="dnc"?"scans":"docs"}" data-id="${o.id}">⚠ Chuyển vào bảng lỗi</button>${o.file?.url?`<a href="${esc(o.file.url)}" target="_blank" rel="noopener">Mở file PDF gốc</a>`:""}</div><div class="page"><img src="${esc(pages[pi])}" alt="Trang ${pi+1}"></div></div></div>`
     :`<div class="empty">${esc(o.source||"Chưa có file")} — hóa đơn này nhập từ file ĐNC.xlsx nên chưa có bản scan.</div>`;
   else if(view==="dnc"&&dn){const sd=dncData(dn);body=`<div class="row"><span class="ttl grow">ĐNC ${esc(dn.ifc)} · ${ST[dn.status][0]} · ${dncInvs(dn).length} HĐ</span>${dn.status==="open"?`<button class="b p" data-a="print" data-id="${dn.id}">🖨 Xuất PDF</button>`:dn.status==="printed"?`<button class="b" data-a="signUp" data-id="${dn.id}">📎 Tải ĐNC đã ký</button>`:""}<button class="b g" data-a="goDnc" data-id="${dn.id}">Mở trong Danh sách ĐNC</button></div>
      ${dn.status==="signed"&&dn.signedPage?`<div class="k">Bản đã ký (scan):</div><div class="page"><img src="${esc(dn.signedPage)}" alt="ĐNC đã ký"></div><div class="k">Bản app dựng lại từ hóa đơn:</div>`:""}<div class="paperbox">${dncHtml(sd)}</div>`;}
@@ -1355,10 +1383,11 @@ function formSummary(f){if(["quy_rap","quy_fb","float","du_thieu"].includes(f.ty
   if(f.type==="voucher")return`<b>${fmt(f.rows.reduce((s,r)=>s+(+r.sl||0),0))}</b> voucher · ${f.rows.length} loại`;
   if(f.type==="dong_phuc")return`${f.rows.length} mặt hàng`;if(f.type==="fb_dem")return`${f.rows.length} mặt hàng`;if(f.type==="fb_dc")return`${f.rows.length} dòng điều chỉnh`;
   if(f.type==="tich_truoc"){const[p]=ttTotals(f);return`<b>${fmt(p)}</b> đ trước VAT · ${f.rows.length} dòng`;}return"";}
-function vScanList(mod){const m=curYM();const list=S.scans.filter(x=>modOf(x)===mod&&x.month===m).sort((a,b)=>(b.at||"").localeCompare(a.at||""));
+function vScanList(mod){const ne=errList([mod]).length;if(S.errView["_"+mod])return errTabs(mod,ne)+vErr([mod]);return errTabs(mod,ne)+vScanList0(mod);}
+function vScanList0(mod){const m=curYM();const list=S.scans.filter(x=>modOf(x)===mod&&x.month===m).sort((a,b)=>(b.at||"").localeCompare(a.at||""));
   if(!list.some(x=>x.id===S.selScan))S.selScan=list[0]?.id||null;const sel=list.find(x=>x.id===S.selScan);const pi=Math.min(S.arcPage,Math.max((sel?.file?.pages||[]).length-1,0));
   return`<div class="split"><div class="panel"><span class="ttl">Bản scan tháng ${ymLbl(m)} · ${list.length}</span><div class="dlist">${list.length?list.map(x=>`<div class="ditem" data-a="selScan" data-id="${x.id}" aria-current="${x.id===S.selScan}" tabindex="0"><div class="row"><b class="grow">${esc(x.type)}</b><span class="k">${(x.file?.pages||[]).length} trang</span></div><div class="k">${esc(x.file?.name||"")} · ${esc(fdate(x.date))}${x.linkLabel?" · gắn: "+esc(x.linkLabel):""}</div>${x.ftype?`<div class="k">${esc(FT[x.ftype]?.name||"")} · ${x.signed2?`<span class="pill ok">Đã ký</span>`:`<span class="pill warn">Chưa đủ 2 chữ ký</span>`}</div>`:modOf(x)==="kk"&&x.type==="Biên bản kiểm kê đã ký"?`<div class="k"><span class="pill warn">Chưa nhận diện – chưa tính vào checklist</span></div>`:""}${x.note?`<div class="k">${esc(x.note)}</div>`:""}</div>`).join(""):`<div class="empty">Chưa có bản scan. Bấm "Tải bản scan".</div>`}</div></div>
-   <div class="panel">${sel?`<div class="row"><span class="ttl grow">${esc(sel.type)}</span><button class="b sm" data-a="pdfScan" data-id="${sel.id}">⬇ Xuất PDF</button><button class="b sm" data-a="printScan" data-id="${sel.id}">🖨 In bản scan</button>${mod==="kk"&&sel.type!==SV_TYPE&&sel.file?.url?`<button class="b sm" data-a="kkRecog" data-id="${sel.id}">🔍 ${sel.ftype?"Nhận diện lại":"Nhận diện biên bản"}</button>`:""}${sel.file?.url?`<a href="${esc(sel.file.url)}" target="_blank" rel="noopener">Mở file gốc</a>`:""}</div>${pagesViewer(sel.file?.pages||[],pi)}`:`<div class="empty">Chọn bản scan để xem.</div>`}</div></div>`;}
+   <div class="panel">${sel?`<div class="row"><span class="ttl grow">${esc(sel.type)}</span><button class="b sm" data-a="pdfScan" data-id="${sel.id}">⬇ Xuất PDF</button><button class="b sm" data-a="printScan" data-id="${sel.id}">🖨 In bản scan</button><button class="b sm d" data-a="toErr" data-k="scans" data-id="${sel.id}">⚠ Chuyển vào bảng lỗi</button>${mod==="kk"&&sel.type!==SV_TYPE&&sel.file?.url?`<button class="b sm" data-a="kkRecog" data-id="${sel.id}">🔍 ${sel.ftype?"Nhận diện lại":"Nhận diện biên bản"}</button>`:""}${sel.file?.url?`<a href="${esc(sel.file.url)}" target="_blank" rel="noopener">Mở file gốc</a>`:""}</div>${pagesViewer(sel.file?.pages||[],pi)}`:`<div class="empty">Chọn bản scan để xem.</div>`}</div></div>`;}
 function pagesViewer(pages,pi){return pages.length?`<div class="viewer"><div class="strip">${pages.map((p,i)=>`<button data-a="arcPage" data-k="${i}" aria-current="${i===pi}"><img src="${esc(p)}" alt="Trang ${i+1}"><span>${i+1}</span></button>`).join("")}</div><div class="page"><img src="${esc(pages[pi])}" alt="Trang ${pi+1}"></div></div>`:`<div class="empty">Không có trang ảnh.</div>`;}
 
 /* ---------- Lập / sửa biên bản ---------- */
@@ -1642,7 +1671,11 @@ function sigDetect(c0){const c=scaleC(c0,900);const W=c.width,H=c.height;const d
   return{color:true,n:gr.length};}
 async function kkRecog(file,step){let cs;if(file.type==="application/pdf"||/\.pdf$/i.test(file.name||""))cs=await renderPdf(file,2.2);else cs=[await imgCanvas(file)];
   step&&step("Đang tìm hướng trang…");const best={sc:-1};
-  for(const deg of [0,90,270,180]){const t=await ocrText(scaleC(rotC(cs[0],deg),1700));const n=OCRP.norm(t);const sc=(n.match(/bien ban|kiem|ngay|so luong|chu ky|ho ten|tien|rap|galaxy|thanh vien/g)||[]).length;if(sc>best.sc)Object.assign(best,{sc,deg,t:n});if(sc>=6)break;}
+  /* dòng chữ nằm ngang hay dọc: so độ dao động của tổng mực theo hàng và theo cột */
+  const ax=(()=>{const c=scaleC(cs[0],600);const W=c.width,H=c.height,d=c.getContext("2d").getImageData(0,0,W,H).data;const R=new Float64Array(H),C=new Float64Array(W);
+    for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=(y*W+x)*4;if(d[i]+d[i+1]+d[i+2]<380){R[y]++;C[x]++;}}
+    const v=a=>{let m=0;a.forEach(x=>m+=x);m/=a.length;let q=0;for(let i=1;i<a.length;i++)q+=Math.abs(a[i]-a[i-1]);return q/a.length/(m||1);};return v(R)>=v(C)?"h":"v";})();
+  for(const deg of ax==="h"?[0,180]:[90,270]){const t=await ocrText(scaleC(rotC(cs[0],deg),1700));const n=OCRP.norm(t);const sc=(n.match(/bien ban|kiem|ngay|so luong|chu ky|ho ten|tien|rap|galaxy|thanh vien|cong ty|dia chi|mat hang/g)||[]).length;if(sc>best.sc)Object.assign(best,{sc,deg,t:n});}
   let type=null;for(const [k,rx] of KK_RX)if(rx.test(best.t)){type=k;break;}
   let date="";const m1=best.t.match(/ngay\s*[:.]?\s*(\d{1,2})\s*[\/.-]\s*(\d{1,2})\s*[\/.-]\s*(20\d{2})/)||best.t.match(/(\d{1,2})\s*\/\s*(\d{1,2})\s*\/\s*(20\d{2})/);const m2=best.t.match(/ngay\s*(\d{1,2})\s*thang\s*(\d{1,2})\s*nam\s*(20\d{2})/);const mm=m1||m2;
   if(mm&&+mm[2]>=1&&+mm[2]<=12&&+mm[1]>=1&&+mm[1]<=31)date=`${mm[3]}-${pad2(mm[2])}-${pad2(mm[1])}`;
@@ -1839,6 +1872,12 @@ document.addEventListener("click",async e=>{const b=e.target.closest("[data-a]")
   else if(a==="openScan"){const m=curYM();S.scanEdit={mod:b.dataset.k,type:SCAN_TYPES[b.dataset.k][0],month:m,date:today().startsWith(m)?today():"",linkId:"",note:"",ncc:""};render();}
   else if(a==="closeScan"){S.scanEdit=null;render();}
   else if(a==="selScan"){S.selScan=id;S.arcPage=0;render();}
+  else if(a==="toErr"){const k=b.dataset.k;if(S.arm==="err"+id){S.arm=null;await toErr(k,id);if(S.selArc===id)S.selArc=null;render();}else{S.arm="err"+id;b.textContent="Bấm lần nữa để chuyển";setTimeout(()=>{if(S.arm==="err"+id){S.arm=null;render();}},4000);}}
+  else if(a==="errTab"){S.errView["_"+b.dataset.k]=!!b.dataset.v;render();}
+  else if(a==="errBack"){await fromErr(b.dataset.k,id);render();}
+  else if(a==="errPw"){S.errView[b.dataset.k]="";render();setTimeout(()=>{const i=document.querySelector(`[data-errpw="${CSS.escape(b.dataset.k)}"]`);if(i)i.focus();},0);}
+  else if(a==="errPwX"){delete S.errView[b.dataset.k];render();}
+  else if(a==="errDel"){const key=b.dataset.k+":"+id;const v=(document.querySelector(`[data-errpw="${CSS.escape(key)}"]`)||{}).value||"";if(v!==ERR_PWD){toast("Sai mật khẩu xóa.","bad");return;}delete S.errView[key];await delErr(b.dataset.k,id);render();}
   else if(a==="kkRevSave")kkRevSave(+b.dataset.k);
   else if(a==="kkRevDrop"){S.scanEdit.rev.splice(+b.dataset.k,1);renderModal();bind();}
   else if(a==="kkScanGo"){const x=S.scans.find(y=>y.id===id);if(x){$("#year").value=x.month.slice(0,4);$("#mon").value=String(+x.month.slice(5));S.msub.kk="scan";S.selScan=id;S.arcPage=0;render();}}
