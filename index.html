@@ -122,6 +122,7 @@ button.mk{border:0;cursor:pointer;font-family:inherit}button.mk:hover{outline:1p
 .kv div:nth-child(odd){color:var(--muted)}
 a{color:var(--accent);font-weight:600}
 .modal{position:fixed;inset:0;background:rgba(15,23,42,.35);z-index:50;display:flex;justify-content:center;align-items:flex-start;overflow:auto;padding:max(24px,env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) 24px max(16px,env(safe-area-inset-left,0px))}
+.modal.full{padding:0}.modal.full .box{width:100%;min-height:100vh;border-radius:0;box-sizing:border-box}.modal.full .scroll.tall{max-height:calc(100vh - 330px)}
 .modal .box{background:var(--bg);border-radius:16px;width:min(1240px,100%);padding:18px;display:flex;flex-direction:column;gap:14px;box-shadow:0 20px 50px rgba(0,0,0,.18)}
 .login{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px}
 .login .card{background:#fff;border-radius:16px;padding:28px 30px;width:min(360px,100%);box-shadow:0 20px 50px rgba(15,23,42,.08);display:flex;flex-direction:column;gap:12px}
@@ -246,26 +247,35 @@ function triples(t){const am=[...new Set((t.match(/\d{1,3}(?:[.,]\d{3}){1,4}(?![
   for(const c of am)for(const a of am){if(a>=c)continue;const b=c-a;if(am.includes(b)&&[5,8,10].some(r=>Math.abs(a*r/100-b)<=2))out.push([a,b,c]);}return out;}
 function fixSerial(s){s=String(s||"").toUpperCase();if(/^\d[0OC]\d\d[A-Z]{2,3}$/.test(s))s=s[0]+"C"+s.slice(2);return/^\dC\d\d[A-Z]{2,3}$/.test(s)?s:"";}
 /* Chốt số tiền: ưu tiên Bằng chữ → ĐNC đi kèm → số trên hóa đơn; chỉ nhận khi có ít nhất 2 nguồn/2 con số độc lập khớp nhau */
-function reconcile(res,raw,W,D,t){const r=res.vatRate,multi=res.multiRate;const ok3=x=>x&&x[0]>0&&x[1]>=0&&x[2]>0&&Math.abs(x[0]+x[1]-x[2])<=2;const near=(a,b)=>a&&Math.abs(a-b)<=2;
+/* Nội dung dòng trên ĐNC (đi trước "HĐ: số") để làm diễn giải khi không đọc được dòng hàng trên hóa đơn */
+function dncDesc(dt,num){const L=dt.split(/\n/);const hs=L.map((l,k)=>[k,(norm(l).match(/\bh[a-z]\s*[:.;]\s*0*(\d{3,})/)||[])[1]]).filter(x=>x[1]);let i=-1;const m=num&&hs.find(x=>x[1]===String(num).replace(/^0+/,""));if(m)i=m[0];else if(hs.length===1)i=hs[0][0];if(i<0)return"";const out=[];
+  for(let j=i,c=0;j>=0&&c<5;j--){let x=L[j];const n=norm(x);if(!n.trim())continue;c++;if(j<i&&/noi dung|truoc vat|so tien|stt|ngay\s*$|nguoi de nghi|du an/.test(n))break;
+    x=x.replace(/H[ĐD]\s*[:.;]\s*\d+.*/i,"").replace(/\d{1,3}(?:[.,]\d{3}){1,4}/g,"").replace(/\b\d{1,2}[-\/][A-Za-z]{3}(?:[-\/]\d{2,4})?\b/g,"").replace(/[|\[\]~_]/g," ").replace(/\s+/g," ").trim();if(x)out.unshift(x);}
+  return out.join(" ").replace(/[„“”"«»•·©®]/g," ").replace(/(^|\s)\d{1,3}(?:[.,]\d{0,3})?[.,]?(?=\s|$)/g," ").replace(/\s+/g," ").trim().slice(0,160);}
+function reconcile(res,raw,W,D,t,dTot,oneInv){const r=res.vatRate,multi=res.multiRate;const ok3=x=>x&&x[0]>0&&x[1]>=0&&x[2]>0&&Math.abs(x[0]+x[1]-x[2])<=2;const near=(a,b)=>a&&Math.abs(a-b)<=2;
   const am=new Set((t.match(/\d{1,3}(?:[.,]\d{3}){1,4}(?![.,]?\d)/g)||[]).map(toNum).filter(x=>x>=1000));const freq=v=>(t.match(new RegExp("(?<![\\d.,])"+v.toLocaleString("en-US").replace(/,/g,"[.,]")+"(?![\\d]|[.,]\\d)","g"))||[]).length;const maxAm=Math.max(0,...am);const dT=[...new Map(D.map(x=>[x.join(),x])).values()];
   const ratio=(s,v)=>s>0&&v/s>0.045&&v/s<0.105;const split=T=>{if(!r||multi)return null;const s=Math.round(T*100/(100+r));return[s,T-s,T];};
   const cand=[];const add=(x,g)=>{if(ok3(x)&&!cand.some(c=>c.x.join()===x.join()))cand.push({x,g});};
   if(W){dT.filter(x=>near(x[2],W)).forEach(x=>add(x,0));if(raw[1])add([W-raw[1],raw[1],W],0);if(raw[0])add([raw[0],W-raw[0],W],0);[...am].filter(v=>v<W&&ratio(v,W-v)).forEach(v=>add([v,W-v,W],0));[...am].filter(v=>v<W&&ratio(W-v,v)).forEach(v=>add([W-v,v,W],0));const sp=split(W);if(sp)add(sp,0);}
   if(dT.length===1)add(dT[0],1);
+  if(dTot){dT.filter(x=>near(x[2],dTot)).forEach(x=>add(x,1));if(raw[1])add([dTot-raw[1],raw[1],dTot],1);[...am].filter(v=>v<dTot&&ratio(dTot-v,v)).forEach(v=>add([dTot-v,v,dTot],1));const sp=split(dTot);if(sp)add(sp,1);}
   triples(t).forEach(x=>add(x,2));add(raw,2);const Ts=[raw[2]].filter(Boolean);
   Ts.forEach(T=>{if(raw[1])add([T-raw[1],raw[1],T],2);if(raw[0])add([raw[0],T-raw[0],T],2);[...am].filter(v=>v<T&&ratio(v,T-v)).forEach(v=>add([v,T-v,T],2));[...am].filter(v=>v<T&&ratio(T-v,v)).forEach(v=>add([T-v,v,T],2));const sp=split(T);if(sp)add(sp,2);});
   if(raw[0]&&raw[1])add([raw[0],raw[1],raw[0]+raw[1]],2);if(r&&raw[1]){const s=Math.round(raw[1]*100/r);add([s,raw[1],s+raw[1]],2);}
-  const sup=x=>{let n=0;const why=[];if(W&&near(W,x[2])){n++;why.push("số viết bằng chữ");}if(dT.some(d=>near(d[2],x[2]))){n++;why.push("trang ĐNC");}
+  const sup=x=>{let n=0;const why=[];if(W&&near(W,x[2])){n++;why.push("số viết bằng chữ");}if(dT.some(d=>near(d[2],x[2]))||near(dTot,x[2])){n++;why.push("trang ĐNC");}
     let k=0,pg=0;[0,1,2].forEach(i=>{if(near(raw[i],x[i]))k++;else if(x[i]&&am.has(x[i]))pg++;});if(k){n+=k;why.push(k+" số đọc đúng nhãn trên hóa đơn");}if(pg){n+=pg/2;why.push(pg+" số in trên hóa đơn");}
     if([5,8,10].some(q=>Math.abs(x[0]*q/100-x[1])<=2))n+=0.5;else if(r&&!multi)n-=1;
     const anc=near(x[2],raw[2])||near(x[2],W)||dT.some(d=>near(d[2],x[2]))||x[2]===maxAm;if(!anc)n=Math.min(n,1);
     const rt=[5,8,10].some(q=>Math.abs(x[0]*q/100-x[1])<=2),seen=v=>v&&(raw.some(y=>near(y,v))||am.has(v));
-    const ts=(W&&near(W,x[2])?1:0)+(dT.some(d=>near(d[2],x[2]))?1:0)+(near(raw[2],x[2])?1:0)+(seen(x[0])&&seen(x[1])?1:0)+(freq(x[2])>=(near(raw[2],x[2])?2:1)?0.5:0)+(rt&&seen(x[0])?0.5:0)+(rt&&seen(x[1])?0.5:0);
+    const ts=(W&&near(W,x[2])?1:0)+(dT.some(d=>near(d[2],x[2]))||near(dTot,x[2])?1:0)+(near(raw[2],x[2])?1:0)+(seen(x[0])&&seen(x[1])?1:0)+(freq(x[2])>=(near(raw[2],x[2])?2:1)?0.5:0)+(rt&&seen(x[0])?0.5:0)+(rt&&seen(x[1])?0.5:0);
     return{n,why,ts};};
   cand.forEach(c=>{Object.assign(c,sup(c.x));c.s=c.n+(freq(c.x[1])>=2?0.25:0);});
   cand.sort((a,b)=>a.g-b.g||b.s-a.s);let best=cand.find(c=>c.n>=2&&c.ts>=2);
   if(best){const tie=cand.find(c=>c!==best&&c.g===best.g&&c.n>=2&&c.ts>=2&&c.s===best.s&&c.x.join()!==best.x.join());if(tie)best=null;}
   const L=v=>(v||0).toLocaleString("vi-VN");
+  if(!best&&oneInv){const pick=dT.find(x=>dTot&&near(x[2],dTot))||(dT.length===1?dT[0]:null)||(dTot&&W&&near(W,dTot)?split(dTot):null);
+    if(pick){[res.subtotal,res.vat,res.total]=pick;res.amtSrc="trang ĐNC";res.fixed=res.fixed.filter(f=>!/Tổng tiền lấy từ trang ĐNC/.test(f));
+      res.fixed.push(`Không đọc chắc số tiền trên hóa đơn, lấy theo trang ĐNC đi kèm (${pick.map(L).join(" / ")})${W&&!near(W,pick[2])?`; số viết bằng chữ đọc ra ${L(W)} không khớp`:""}. Đối chiếu lại với hóa đơn.`);return;}}
   if(!best){res.subtotal=0;res.vat=0;res.total=0;res.amtBad=`Không chắc số tiền: ${[W&&"bằng chữ "+L(W),dT.length&&"ĐNC "+dT.map(x=>L(x[2])).join("/"),raw.some(Boolean)&&"số trên HĐ "+raw.map(L).join(" / ")].filter(Boolean).join("; ")||"không đọc được bộ số tiền nào khớp nhau"}. Nhập tay theo hóa đơn.`;return;}
   const changed=best.x[0]!==raw[0]||best.x[1]!==raw[1]||best.x[2]!==raw[2];const wasG=res.fixed.some(f=>/ghép/.test(f));[res.subtotal,res.vat,res.total]=best.x;res.amtSrc=best.why.join(" + ");
   res.fixed=res.fixed.filter(f=>!/Tổng tiền lấy từ trang ĐNC/.test(f));
@@ -294,12 +304,13 @@ function parse(pageTexts,nth){
   const rc={};(n.match(/\b(5|8|10)\s*%/g)||[]).forEach(x=>{const k=parseInt(x);rc[k]=(rc[k]||0)+1;});const rk=Object.keys(rc).sort((x,y)=>rc[y]-rc[x]);res.vatRate=rk.length?Number(rk[0]):null;res.multiRate=rk.length>1;
   const raw=[res.subtotal||0,res.vat||0,res.total||0];
   const ip3=types.indexOf("de_nghi_chi");
-  if(!res.total&&ip3>=0){const dl=pageTexts[ip3].split(/\n/).find(l=>/t[a-z]{1,2}ng.{0,8}thanh\s*to[a-z]n/.test(norm(l))&&lastMoney(l));if(dl){res.total=lastMoney(dl);res.fixed=(res.fixed||[]).concat("Tổng tiền lấy từ trang ĐNC đi kèm");}}
+  let dTot=0;if(ip3>=0){const dl=pageTexts[ip3].split(/\n/).find(l=>/t[a-z]{1,2}ng\s*(c[a-z]{1,2}ng|thanh\s*to[a-z]n)/.test(norm(l))&&lastMoney(l));if(dl)dTot=lastMoney(dl);}
+  if(ip3>=0)res.dncDesc=dncDesc(pageTexts[ip3],res.number);
   /* nhãn và số tiền bị tách dòng (bố cục 2 cột): tìm bộ 3 số tiền trên trang hóa đơn thỏa trước thuế + thuế = tổng, thuế = 5/8/10% */
   if(!res.total){const am=[...new Set((t.match(/\d{1,3}(?:[.,]\d{3}){1,4}(?![.,]?\d)/g)||[]).map(toNum).filter(x=>x>=1000))].sort((a,b)=>b-a);let best=null;
     for(const c of am){for(const a of am){if(a>=c)continue;const b=c-a;for(const r of [5,8,10])if(Math.abs(a*r/100-b)<=2&&am.includes(b)){best=[a,b,c];break;}if(best)break;}if(best)break;}
     if(best){[res.subtotal,res.vat,res.total]=best;res.fixed=(res.fixed||[]).concat("Tổng tiền ghép từ các số tiền trên hóa đơn (nhãn và số bị tách dòng)");}}
-  res.fixed=res.fixed||[];reconcile(res,raw,wordsTotal(t),ip3>=0?triples(pageTexts[ip3]):[],t);
+  res.fixed=res.fixed||[];reconcile(res,raw,wordsTotal(t),ip3>=0?triples(pageTexts[ip3]):[],t,dTot,(res.dncNums||[]).length<=1);
   {const q=[5,8,10].find(q=>res.subtotal&&Math.abs(res.subtotal*q/100-res.vat)<=Math.max(2,res.subtotal*0.0005));if(q)res.vatRate=q;}
   if(res.subtotal&&res.total&&Math.abs(res.subtotal+res.vat-res.total)>2){if(res.total>res.subtotal)res.vat=res.total-res.subtotal;}
   if(res.subtotal&&res.vat&&!res.total)res.total=res.subtotal+res.vat;
@@ -594,7 +605,7 @@ function monthsWithData(y){const s=new Set();const k=KP[y];if(k)for(let m=1;m<=k
 function setupPeriod(){const ys=yearsAvail();const cy=String(new Date().getFullYear());
   $("#year").innerHTML=ys.map(y=>`<option ${y===cy?"selected":""}>${y}</option>`).join("");fillMonths(true);}
 function fillMonths(pickLatest){const y=$("#year").value;const has=monthsWithData(y);const cm=new Date().getMonth()+1;const cy=String(new Date().getFullYear());
-  let sel=+($("#mon").value||cm);if(pickLatest){const cand=[...has].filter(m=>y!==cy||m<=cm);sel=cand.length?Math.max(...cand):(y===cy?cm:12);}
+  let sel=+($("#mon").value||cm);if(pickLatest){if(y===cy)sel=cm;else{const cand=[...has];sel=cand.length?Math.max(...cand):12;}}
   $("#mon").innerHTML=[...Array(12)].map((_,i)=>`<option value="${i+1}" ${i+1===sel?"selected":""}>Tháng ${i+1}${has.has(i+1)?"":" ·"}</option>`).join("");}
 const curYM=()=>`${$("#year").value}-${String($("#mon").value).padStart(2,"0")}`;
 $("#year").addEventListener("change",()=>{fillMonths(true);S.selDnc=null;S.selArc=null;render();});
@@ -669,7 +680,7 @@ async function xmlItem(q,hash){const doc=new DOMParser().parseFromString(await q
     await Store.put("inv",hit.id,upd);S.edit.delete(hit.id);await logIt(q.name,"Đã lưu",`Cập nhật số tiền HĐ ${number} theo XML: ${fmt(r.total)} đ`);S.queue=S.queue.filter(x=>x!==q);render();return;}
   Object.assign(d,{xmlOnly:true,xml:src,file:{name:q.name,url:src.url,pages:[]},fileHash:hash,fixed:["Số tiền lấy theo file XML hóa đơn điện tử"],source:"File XML"});
   const nid=uid();d.gid=S.joinGid||nid;S.openG.add(d.gid);await Store.put("inv",nid,d);S.queue=S.queue.filter(x=>x!==q);render();}
-async function skip(q,result,msg){q.err=msg;q.state=result;q.skipped=true;render();await logIt(q.name,result,msg);}
+async function skip(q,result,msg,ref){q.ref=ref||null;q.err=msg;q.state=result;q.skipped=true;render();await logIt(q.name,result,msg);}
 async function addFiles(files){
   for(const f of files){if(!/pdf|image\/|xml/.test(f.type)&&!/\.xml$/i.test(f.name)){S.queue.push({id:uid(),name:f.name,state:"Không đọc",err:"Chỉ nhận PDF, ảnh hoặc XML hóa đơn điện tử.",skipped:true});continue;}S.queue.push({id:uid(),file:f,name:f.name,state:"Đang kiểm tra file…"});}
   render();if(S._qRun)return;S._qRun=true;
@@ -683,7 +694,7 @@ async function processItem(q){
     const olds=hash?S.inv.filter(i=>i.fileHash===hash&&i.status!=="confirmed"):[];
     for(const o of olds){await Store.del("inv",o.id);S.edit.delete(o.id);}
     const same=hash&&(S.inv.find(i=>i.fileHash===hash&&i.status==="confirmed")||S.docs.find(i=>i.fileHash===hash));
-    if(same)return skip(q,"Trùng",`File này đã tải lên trước đây (${same.number?"HĐ "+same.number:same.type} ngày ${dmy(same.date)}). Không đọc lại.`);
+    if(same)return skip(q,"Trùng",`File này đã tải lên trước đây (${same.number?"HĐ "+same.number:same.type} ngày ${dmy(same.date)}, tháng ${ymLbl(same.month||"")}). Không đọc lại.`,{k:S.inv.includes(same)?"inv":"docs",id:same.id});
     if(hash&&S.queue.some(x=>x!==q&&x.hash===hash))return skip(q,"Trùng","File bị chọn hai lần trong lượt này.");
     q.hash=hash;step(olds.length?"Đang quét lại (thay bản nháp cũ)…":"Đang mở file…");
     let texts,thumbs,cropNo,cropAmt;try{({texts,thumbs,cropNo,cropAmt}=await readPages(q.file,step));}catch(e){const m=String(e.message||e);if(/Tesseract|tesseract|jsdelivr/.test(m))return skip(q,"Không đọc",DEMO?"Bản xem trước trong Claude không tải được bộ quét chữ (OCR). Trên Vercel file này được quét tự động.":"Không chạy được bộ quét chữ: "+m);return skip(q,"Lỗi","File lỗi, không mở được: "+m);}
@@ -701,7 +712,7 @@ async function processItem(q){
     const isDup=x=>S.inv.find(i=>i.seller?.mst===x.seller.mst&&String(i.number)===String(x.number)&&String(i.serial||"")===String(x.serial||""));
     const xm=S.inv.find(i=>i.status==="draft"&&i.xmlOnly&&i.seller?.mst===d.seller.mst&&String(i.number)===String(d.number));
     const dup=!xm&&isDup(d);
-    if(dup)return skip(q,"Trùng",`Trùng HĐ ${d.serial} ${d.number} (${d.seller.name}) đã ${dup.status==="confirmed"?"lưu":"chờ xác nhận"}. Không tạo ĐNC.`);
+    if(dup)return skip(q,"Trùng",`Trùng HĐ ${d.serial} ${d.number} (${d.seller.name}) đã ${dup.status==="confirmed"?"lưu ở tháng "+ymLbl(dup.month||""):"có bản nháp chờ xác nhận"}. Không tạo thêm.`,{k:"inv",id:dup.id});
     step("Đang lưu file gốc…");
     const file={name:q.name,url:await storeFile(q.file,(d.date||"chua-ro").slice(0,7)+"/hoa-don"),pages:thumbs};const id=uid();const gid=S.joinGid||id;
     const extra=built.slice(1).filter(x=>!isDup(x)),skipped=built.slice(1).filter(x=>isDup(x)).map(x=>`HĐ ${x.number} (${isDup(x).status==="confirmed"?"đã lưu":"đang chờ xác nhận"})`);
@@ -723,7 +734,7 @@ async function nonInvoice(q,r,texts,thumbs,hash){const types=r.pages.map(p=>p.ty
       await Store.put("dnc",dn.id,Object.assign({},dn,{status:"signed",signedPage:thumbs[ip]||"",signedUrl:url,signedAt:nowIso(),signedNote:"Bản scan ĐNC đã ký"}));
       return skip(q,"Đã ký",`Đã gắn vào ĐNC ${dn.ifc} tháng ${ymLbl(dn.month)} và chuyển sang Đã ký.`);}
     const signedHit=S.dnc.find(d=>d.status==="signed"&&S.inv.some(i=>(d.invIds||[]).includes(i.id)&&nums.includes(String(i.number))));
-    if(signedHit)return skip(q,"Trùng",`ĐNC này (HĐ ${nums.join(", ")}) đã ở trạng thái Đã ký tháng ${ymLbl(signedHit.month)}.`);}
+    if(signedHit)return skip(q,"Trùng",`ĐNC này (HĐ ${nums.join(", ")}) đã ở trạng thái Đã ký tháng ${ymLbl(signedHit.month)}.`,{k:"dnc",id:signedHit.id});}
   /* tháng: ngày đầu tiên đọc được trên chứng từ, không có thì tháng đang xem */
   let ym=curYM(),date="";const MON={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
   const ok3=(d,m,y)=>m>=1&&m<=12&&d>=1&&d<=31;const cands=[];
@@ -735,10 +746,10 @@ async function nonInvoice(q,r,texts,thumbs,hash){const types=r.pages.map(p=>p.ty
   let dm=ds.length?(()=>{const x=ds[ds.length-1];return[x,+x.slice(8),+x.slice(5,7),+x.slice(0,4)];})():null;
   if(dm&&ok3(+dm[1],+dm[2],+dm[3])){date=`${dm[3]}-${pad2(dm[2])}-${pad2(dm[1])}`;ym=date.slice(0,7);}
   const mst=((all.replace(/\s/g,"").match(/0\d{9}(?:-\d{3})?/g)||[]).find(x=>x.replace(/-.*/,"")!=="0101595681"&&S.byMst.has(x)))||"";
-  const v=mst?(S.byMst.get(mst)||[])[0]:null;const type=types.includes("thong_bao")?"Thông báo thanh toán":ip>=0?"ĐNC đã ký (chưa khớp ĐNC trên app)":(PAGE[types.find(x=>x!=="khac")]||"Chứng từ khác");
+  const v=mst?(S.byMst.get(mst)||[])[0]:null;const type=types.includes("thong_bao")?"Thông báo thanh toán":ip>=0?"ĐNC đã ký – chờ hóa đơn":(PAGE[types.find(x=>x!=="khac")]||"Chứng từ khác");
   q.state="Đang lưu vào lưu trữ…";render();const url=await storeFile(q.file,ym+"/chung-tu-khac");
   const dncNums=ip>=0?[...OCRP.norm(texts[ip]).matchAll(/\bh[a-z]\s*[:.;]\s*(\d{3,10})/g)].map(m=>m[1].replace(/^0+(?=\d)/,"")):[];
-  await Store.put("docs",uid(),{type,month:ym,date,seller:{name:v?v[1]:"",mst},number:dncNums.join(", "),dncNums,dncPage:ip>=0?ip:null,total:0,note:"Lưu từ file "+q.name,file:{name:q.name,url,pages:thumbs},fileHash:hash,pages:r.pages});
+  await Store.put("docs",uid(),{type,month:ym,date,seller:{name:v?v[1]:"",mst},number:dncNums.join(", "),dncNums,dncMoney:ip>=0?[...new Set((texts[ip].match(/\d{1,3}(?:[.,]\d{3})+/g)||[]).map(x=>+x.replace(/[.,]/g,"")))].slice(0,30):[],dncPage:ip>=0?ip:null,total:0,note:"Lưu từ file "+q.name,file:{name:q.name,url,pages:thumbs},fileHash:hash,pages:r.pages});
   if(ip>=0)return skip(q,"Chứng từ khác",`ĐNC đã ký${dncNums.length?" (HĐ "+dncNums.join(", ")+")":""} chưa khớp ĐNC nào trên app. Đã lưu tạm vào lưu trữ tháng ${ymLbl(ym)}; khi hóa đơn này được tải lên và xác nhận, app tự gắn ĐNC đã ký vào.`);
   return skip(q,"Chứng từ khác",`Không có hóa đơn GTGT. Đã lưu "${type}" vào lưu trữ tháng ${ymLbl(ym)}${v?" · "+v[1]:""}.`);}
 function imgCanvas(f){return new Promise((ok,no)=>{const im=new Image();im.onload=()=>{const c=document.createElement("canvas");c.width=im.naturalWidth;c.height=im.naturalHeight;c.getContext("2d").drawImage(im,0,0);ok(c);};im.onerror=no;im.src=URL.createObjectURL(f);});}
@@ -750,7 +761,7 @@ function buildDraft(r,q){
   if(tpl?.anchors){const a=OCRP.readAnchors(r.text,tpl.anchors);["number","date","subtotal","vat","total"].forEach(k=>{if(r.amtBad&&/total|vat/.test(k))return;if(a[k]&&!r[k])r[k]=a[k];});}
   let serial=r.serial;if(tpl?.lastSerial&&(!serial||serial!==tpl.lastSerial&&serial.length===tpl.lastSerial.length&&[...serial].filter((ch,i)=>ch!==tpl.lastSerial[i]).length<=1))serial=tpl.lastSerial;
   const v=(S.byMst.get(mst)||[])[0];const used=S.inv.find(i=>i.status==="confirmed"&&i.seller?.mst===mst&&i.vendorNo);
-  let items=(r.items&&r.items.length?r.items:[{desc:"",amount:r.subtotal}]).map(it=>{const ru=ruleFor(tpl,it.desc);return{desc:it.desc,amount:it.amount,vatRate:r.vatRate||tpl?.vatRate||null,hm:ru?ru[2]:""};});
+  let items=(r.items&&r.items.length?r.items:[{desc:r.dncDesc||"",amount:r.subtotal}]).map(it=>{const ru=ruleFor(tpl,it.desc);return{desc:it.desc,amount:it.amount,vatRate:r.vatRate||tpl?.vatRate||null,hm:ru?ru[2]:""};});
   const first=ruleFor(tpl,items.map(x=>x.desc).join(" "));
   /* chưa khớp quy tắc nào: lấy diễn giải / hạng mục của lần gần nhất cùng NCC */
   const lastInv=S.inv.filter(i=>i.status==="confirmed"&&i.seller?.mst===mst&&i.cat).sort((a,b)=>(b.confirmedAt||"").localeCompare(a.confirmedAt||""))[0];
@@ -854,7 +865,7 @@ async function uploadSigned(dnId,file){const dn=S.dnc.find(x=>x.id===dnId);if(!d
   try{let page="";if(file.type==="application/pdf"){const c=await renderPdf(file,1.6);page=c[0]?thumb(c[0]):"";}else page=thumb(await imgCanvas(file));
     const url=await storeFile(file,dn.month+"/dnc-da-ky");await Store.put("dnc",dn.id,Object.assign({},dn,{status:"signed",signedUrl:url,signedPage:page,signedAt:nowIso(),signedNote:"Bản scan ĐNC đã ký"}));toast("Đã lưu ĐNC đã ký.");}
   catch(e){toast("Không lưu được file: "+(e.message||e),"bad");}}
-const ST={open:["Đang mở – chưa in","warn"],printed:["Đã in – chờ ký","inf"],signed:["Đã ký","ok"]};
+const ST={open:["ĐNC mới – chưa in","warn"],printed:["Đã in – chờ ký","inf"],signed:["Đã ký","ok"]};
 
 /* ---------- Kinh phí rạp ---------- */
 function kpRows(y){return(KP[y]?.rows)||KPROWS;}
@@ -946,7 +957,8 @@ async function kyFix(){const mv=S.inv.filter(i=>i.status==="confirmed"&&/^\d{4}-
     if(ks.length===1&&d.month!==ks[0]){const o=Object.assign({},d);delete o.id;o.month=ks[0];o.key=dKey(ks[0],d.ifc,d.payeeKey,d.mst);await Store.put("dnc",d.id,o);}}
   toast(`Đã chuyển ${mv.length} hóa đơn về đúng tháng theo kỳ chi phí (${[...new Set(mv.map(i=>"HĐ "+i.number+" → "+ymLbl(i.ky)))].join(", ")}).`);}
 /* Bản scan lỗi: tách khỏi dữ liệu chính để không tính vào checklist, lưu trữ, Kinh phí, ĐNC */
-function splitErr(){["inv","docs","scans"].forEach(k=>{const m=new Map();(S.err[k]||[]).forEach(x=>m.set(x.id,x));(S[k]||[]).forEach(x=>m.set(x.id,x));const all=[...m.values()];S[k]=all.filter(x=>!x.errAt);S.err[k]=all.filter(x=>x.errAt);});}
+const PEND_DNC="ĐNC đã ký – chờ hóa đơn";
+function splitErr(){(S.docs||[]).forEach(d=>{if(d.type==="ĐNC đã ký (chưa khớp ĐNC trên app)")d.type=PEND_DNC;});["inv","docs","scans"].forEach(k=>{const m=new Map();(S.err[k]||[]).forEach(x=>m.set(x.id,x));(S[k]||[]).forEach(x=>m.set(x.id,x));const all=[...m.values()];S[k]=all.filter(x=>!x.errAt);S.err[k]=all.filter(x=>x.errAt);});}
 const ERR_PWD="0000";
 async function toErr(kind,id){const o=S[kind].find(x=>x.id===id);if(!o)return;
   if(kind==="inv"&&o.dncId){const dn=S.dnc.find(d=>d.id===o.dncId);if(dn){const own=dn.status==="signed"&&o.file?.url&&dn.signedUrl===o.file.url;
@@ -994,7 +1006,7 @@ function vList(){
   if(!list.length)return ckHtml+`<div class="panel empty">Tháng ${ymLbl(m)} chưa có ĐNC. ĐNC nằm theo tháng của ngày hóa đơn.</div>`;
   const items=list.map(dn=>{const x=dncData(dn);return`<div class="ditem" data-a="sel" data-id="${dn.id}" aria-current="${dn.id===S.selDnc}" tabindex="0">
    <div class="row"><b class="grow">${esc(dn.ifc)} · ${esc(ifcName(dn.ifc))}</b><span class="pill ${ST[dn.status][1]}">${ST[dn.status][0]}</span></div>
-   <div class="k">${esc(x.bank.ten)} · ${x.nInv} HĐ · ngày đề nghị ${esc(dmy(dn.ngayDeNghi||dn.createdAt))}${dn.seq>1?` · lần ${dn.seq}`:""}</div><div class="num"><b>${fmt(x.total)}</b> đ</div></div>`;}).join("");
+   <div class="k">${esc(x.bank.ten)} · ${x.nInv} HĐ · ngày đề nghị ${esc(dmy(dn.ngayDeNghi||dn.createdAt))}${dn.seq>1?` · ĐNC thứ ${dn.seq} trong tháng`:""}</div><div class="num"><b>${fmt(x.total)}</b> đ</div></div>`;}).join("");
   const sel=list.find(x=>x.id===S.selDnc);const sd=dncData(sel);
   const code=`ĐNC ${S.rap}-${sel.month}-${sel.ifc}-${String(sel.seq).padStart(2,"0")}`;
   const body=sel.status==="signed"&&sel.signedPage?`<div class="page"><img src="${esc(sel.signedPage)}" alt="ĐNC đã ký"></div>`:`<div class="paperbox">${dncHtml(sd)}</div>`;
@@ -1028,6 +1040,15 @@ function vArchive(){
      <div class="row"><span class="num grow">${o.total?`<b>${fmt(o.total)}</b> đ`:`<span class="k">${esc(o.note||"")}</span>`}</span>${o.file?.pages?.length?`<span class="k">${o.file.pages.length} trang</span>`:`<span class="k">${esc(o.source||"")}</span>`}</div></div>`}).join(""))+`</div>`}).join(""):`<div class="empty">Chưa có chứng từ trong tháng này.</div>`}</div></div>`;
   const cur=list.find(x=>x.o.id===S.selArc);
   return errTabs("dnc",ne)+`<div class="split">${left}<div class="panel">${cur?arcDetail(cur):`<div class="empty">Bấm vào tên nhà cung cấp bên trái để mở danh sách chứng từ.</div>`}</div></div><input type="file" id="signFile" accept="application/pdf,image/*" hidden>`;}
+function pendSuggest(o){const nums=(o.dncNums||[]).map(String),money=o.dncMoney||[];const dTot=d=>dncInvs(d).reduce((a,i)=>a+(+i.total||0),0);
+  const mAdj=m=>{if(!m||!o.month)return false;const f=v=>+v.slice(0,4)*12+ +v.slice(5,7);return Math.abs(f(m)-f(o.month))<=1;};
+  const sc=S.dnc.filter(d=>d.status!=="signed").map(d=>{const iv=dncInvs(d);let n=0;const why=[];
+    if(iv.some(i=>nums.includes(String(i.number)))){n+=3;why.push("trùng số HĐ");}
+    if(o.seller?.mst&&d.mst===o.seller.mst||o.seller?.name&&iv.some(i=>i.seller?.name===o.seller.name)){n+=2;why.push("cùng NCC");}
+    if(money.includes(dTot(d))){n+=2;why.push("trùng tổng tiền");}if(mAdj(d.month)){n+=1;why.push("cùng/gần tháng");}return{d,n,why,iv,tot:dTot(d)};}).filter(x=>x.n>=2).sort((a,b)=>b.n-a.n).slice(0,5);
+  return`<div class="panel" style="border:1px solid var(--line);margin-bottom:10px"><span class="ttl">ĐNC gần giống trên app</span><div class="k">Bản ĐNC đã ký này chưa có hóa đơn đi kèm${nums.length?` (đọc được HĐ ${esc(nums.join(", "))})`:""}. Chọn đúng ĐNC rồi bấm Gắn: ĐNC chuyển sang Đã ký. Không thấy ĐNC phù hợp thì tải hóa đơn lên, app tự gắn khi xác nhận.</div>
+   ${sc.length?`<table class="t"><thead><tr><th>ĐNC</th><th>Số HĐ</th><th class="num">Tổng</th><th>Lý do gợi ý</th><th></th></tr></thead><tbody>${sc.map(x=>`<tr><td><b>${esc(x.d.ifc)}</b> · ${esc(ymLbl(x.d.month))}<div class="k">${esc(x.iv[0]?.seller?.name||"")} · ${ST[x.d.status][0]}</div></td><td>${esc(x.iv.map(i=>i.number).join(", "))}</td><td class="num">${fmt(x.tot)}</td><td>${esc(x.why.join(", "))}</td>
+     <td style="white-space:nowrap"><button class="b sm" data-a="goDnc" data-id="${x.d.id}">Mở ĐNC</button> <button class="b sm p" data-a="linkDnc" data-id="${x.d.id}" data-k="${o.id}">Gắn vào ĐNC này</button></td></tr>`).join("")}</tbody></table>`:`<div class="empty">Chưa có ĐNC chưa ký nào gần giống.</div>`}</div>`;}
 function arcDetail(x){const o=x.o;const pages=o.file?.pages||[];S._arcPages=pages;S._arcFile=o.file;const types=o.pages||[];const dn=x.kind==="inv"?S.dnc.find(d=>d.id===o.dncId):null;
   const view=S.arcView;const pi=Math.min(S.arcPage,Math.max(pages.length-1,0));
   const tabs=`<nav class="tabs small"><button data-a="arcView" data-k="pages" aria-selected="${view==="pages"}">Bộ chứng từ (${pages.length} trang)</button>${x.kind==="inv"&&dn?`<button data-a="arcView" data-k="dnc" aria-selected="${view==="dnc"}">ĐNC đi kèm</button>`:""}<button data-a="arcView" data-k="info" aria-selected="${view==="info"}">Thông tin & kiểm tra</button></nav>`;
@@ -1045,10 +1066,10 @@ function arcDetail(x){const o=x.o;const pages=o.file?.pages||[];S._arcPages=page
      ${x.kind==="inv"?`<div class="scroll"><table class="t"><thead><tr><th>Dòng hàng / dịch vụ</th><th class="n">Trước thuế</th><th>VAT</th><th>Hạng mục kinh phí</th></tr></thead><tbody>${(o.items||[]).map(it=>`<tr><td>${esc(it.desc)}</td><td class="n">${fmt(it.amount)}</td><td>${it.vatRate!=null?it.vatRate+"%":"—"}</td><td>${esc(it.hm)} ${esc(hmName(it.hm))}</td></tr>`).join("")}</tbody></table></div>
       <div class="checks">${cs.map(c=>`<div><span class="pill ${{bad:"bad",warn:"warn",inf:"inf"}[c.lv]}">${c.lv==="bad"?"Lỗi":c.lv==="warn"?"Cảnh báo":"Thông tin"}</span><span>${esc(c.t)}</span></div>`).join("")}</div>
       ${!dn||dn.status==="open"?`<div><button class="b d" data-a="del" data-id="${o.id}">${S.arm==="del"+o.id?"Bấm lần nữa để xóa":"Xóa hóa đơn"}</button></div>`:""}`:""}`;}
-  return `<div class="row"><span class="ttl grow">${esc(o.seller?.name||o.type)}</span><span class="num"><b>${fmt(o.total)}</b> đ</span></div>${tabs}${body}`;}
+  return `<div class="row"><span class="ttl grow">${esc(o.seller?.name||o.type)}</span><span class="num"><b>${fmt(o.total)}</b> đ</span></div>${x.kind==="doc"&&o.type===PEND_DNC?pendSuggest(o):""}${tabs}${body}`;}
 
 /* ---------- Modal tải hóa đơn ---------- */
-function renderModal(){const md=$("#modal");const open=S.modal||S.fedit||S.scanEdit;md.hidden=!open;if(!open)return;
+function renderModal(){const md=$("#modal");const open=S.modal||S.fedit||S.scanEdit;md.hidden=!open;md.classList.toggle("full",!!S.fedit);if(!open)return;
   if(S.fedit){setHTML($("#modalBox"),formEditor());return;}if(S.scanEdit){setHTML($("#modalBox"),scanEditor());return;}
   const drafts=S.inv.filter(i=>i.status==="draft").sort((a,b)=>(a.createdAt||"").localeCompare(b.createdAt||""));
   const log=[...S.log].sort((a,b)=>(b.at||"").localeCompare(a.at||"")).slice(0,25);
@@ -1057,7 +1078,7 @@ function renderModal(){const md=$("#modal");const open=S.modal||S.fedit||S.scanE
   <div class="panel"><div class="drop" id="drop" tabindex="0" role="button" aria-label="Chọn file hóa đơn"><b>Kéo thả hoặc bấm để chọn file PDF / ảnh / XML hóa đơn điện tử</b><br>Mỗi file một bộ chứng từ. App tự đọc hóa đơn, tự xếp vào đúng tháng theo kỳ chi phí ghi trong nội dung hóa đơn. Có ĐNC đã ký: lưu thẳng thành Đã ký. Chỉ có hóa đơn: tạo ĐNC để in ký. File chỉ có ĐNC đã ký: tự gắn vào ĐNC đang chờ ký.</div>
    <input type="file" id="file" accept="application/pdf,image/jpeg,image/png,.xml,text/xml,application/xml" multiple hidden>
    
-   ${S.queue.map(q=>`<div class="row"><span class="pill ${rc[q.state]||"neu"}">${esc(q.state)}</span><span class="grow">${esc(q.name)}</span>${q.err?`<span class="k">${esc(q.err)}</span>`:""}${q.skipped?`<button class="b sm" data-a="dq" data-id="${q.id}">Bỏ</button>`:""}</div>`).join("")}</div>
+   ${S.queue.map(q=>`<div class="row"><span class="pill ${rc[q.state]||"neu"}">${esc(q.state)}</span><span class="grow">${esc(q.name)}</span>${q.err?`<span class="k">${esc(q.err)}</span>`:""}${q.ref?`<button class="b sm" data-a="openRef" data-k="${q.ref.k}" data-id="${q.ref.id}">Mở bản đã có</button>`:""}${q.skipped?`<button class="b sm" data-a="dq" data-id="${q.id}">Bỏ</button>`:""}</div>`).join("")}</div>
   ${draftsBox(drafts)}
   <div class="panel"><div class="row"><span class="ttl grow">Nhật ký tải lên</span>${S.log.length?`<button class="b sm d" data-a="logClr">${S.arm==="logClr"?"Bấm lần nữa để xóa nhật ký":"🗑 Xóa nhật ký"}</button>`:""}</div>${log.length?`<div class="scroll"><table class="t"><thead><tr><th>Thời gian</th><th>File</th><th>Kết quả</th><th>Chi tiết</th></tr></thead><tbody>${log.map(l=>`<tr><td style="white-space:nowrap">${esc(dmy(l.at))} ${esc(String(l.at).slice(11,16))}</td><td>${esc(l.file)}</td><td><span class="pill ${rc[l.result]||"neu"}">${esc(l.result)}</span></td><td>${esc(l.msg)}</td></tr>`).join("")}</tbody></table></div>`:`<div class="k">Chưa có lượt tải lên.</div>`}</div>`);}
 /* Bản nháp: gom theo bộ (cùng file / cùng ĐNC), mở lại được bất cứ lúc nào */
@@ -1264,6 +1285,7 @@ const cashTotal=f=>(f.rows||[]).reduce((s,r)=>s+(+r.denom||0)*(+r.sl||0),0);
 const ttTotals=f=>(f.rows||[]).reduce((a,r)=>[a[0]+(+r.pre||0),a[1]+(+r.vat||0)],[0,0]);
 function seriesCount(s){let n=0,ok=true;String(s||"").split(/\n|;|,/).forEach(p=>{const m=p.match(/([A-Z]*)(\d+)\s*-\s*([A-Z]*)(\d+)/i);if(m){n+=Math.abs(+m[4]-+m[2])+1;}else if(p.trim())ok=false;});return ok?n:null;}
 function formChecks(f){const c=[],add=(lv,t)=>c.push({lv,t});const st=S.settings||{};
+  {const bad=(f.rows||[]).map((r,i)=>[i,r.hsd??r.ngay]).filter(([,v])=>v&&/\d/.test(v)&&!/^\d{4}-\d{2}-\d{2}$/.test(dmyIn(v)));if(bad.length)add("warn",`Ngày chưa đúng dạng dd/mm/yyyy (ghi chữ như "Không có HSD" thì được) ở dòng ${bad.map(x=>x[0]+1).join(", ")}.`);}
   if(["quy_rap","quy_fb","float"].includes(f.type)){const t=cashTotal(f);const dm=qDM(qOfForm(f));
     const rc=cashRec(f);
     if(f.type!=="float"&&rc&&rc.covered){add("inf",`Định mức ${fmt(rc.dm)} đ − đã chi chưa hoàn ${fmt(rc.ps)} đ (${rc.pend.length} khoản theo sổ quỹ) = tồn sổ ${fmt(rc.book)} đ.`);
@@ -1284,7 +1306,7 @@ function formChecks(f){const c=[],add=(lv,t)=>c.push({lv,t});const st=S.settings
     if(vr.length)add("inf",`${vr.length} mặt hàng có lệch kiểm kê trên Vista (Variance Quantity khác 0): ${vr.slice(0,5).map(r=>`${r.ten} ${r._v.var>0?"+":""}${fmtQ(r._v.var)}`).join("; ")}${vr.length>5?"…":""}.`);
     if(neg.length)add("bad",`${neg.length} mặt hàng tồn âm trên Vista: ${neg.map(r=>`${r.ten} ${fmtQ(r.sl)}`).join("; ")}. Kiểm tra lại phiếu xuất/nhập trước khi ký.`);
     if(ed.length)add("warn",`${ed.length} dòng SL thực tế đã sửa khác số Vista: ${ed.slice(0,5).map(r=>r.ten).join(", ")}.`);}
-  if(f.type==="fb_dem"){const d=f.date;let exp=0,soon=[];(f.rows||[]).forEach(r=>{if(/^\d{4}-\d{2}-\d{2}$/.test(r.hsd)){if(r.hsd<d)exp++;else if(r.hsd<=ymAdd(d.slice(0,7),1)+d.slice(7))soon.push(r.ten);}});
+  if(f.type==="fb_dem"){const d=f.date;let exp=0,soon=[];(f.rows||[]).forEach(r=>{const hs=dmyIn(r.hsd);if(/^\d{4}-\d{2}-\d{2}$/.test(hs)){if(hs<d)exp++;else if(hs<=ymAdd(d.slice(0,7),1)+d.slice(7))soon.push(r.ten);}});
     if(exp)add("bad",`${exp} mặt hàng đã quá hạn sử dụng tại ngày kiểm.`);if(soon.length)add("warn",`${soon.length} mặt hàng hết hạn trong 30 ngày: ${soon.slice(0,6).join(", ")}${soon.length>6?"…":""}`);
     const miss=(f.rows||[]).filter(r=>r.sl===null||r.sl===""||r.sl===undefined).length;if(miss)add("warn",`${miss} mặt hàng chưa nhập số lượng thực tế.`);}
   if(f.type==="fb_dc"){const inc=f.rows.filter(r=>/tăng/i.test(r.loai)).length,dec=f.rows.filter(r=>/giảm/i.test(r.loai)).length;add("inf",`${inc} dòng tăng, ${dec} dòng giảm.`);
@@ -1369,7 +1391,7 @@ function vFormList(mod){const m=curYM();const y=m.slice(0,4);
   if(!list.some(f=>f.id===S.selForm))S.selForm=list[0]?.id||null;
   const sel=list.find(f=>f.id===S.selForm);
   const left=`<div class="panel"><div class="row"><span class="ttl grow">Tháng ${ymLbl(m)} · ${list.length} biên bản</span></div>
-   <div class="dlist">${list.length?list.map(f=>`<div class="ditem" data-a="selForm" data-id="${f.id}" aria-current="${f.id===S.selForm}" tabindex="0"><div class="row"><b class="grow">${esc(FT[f.type].name)}</b><span class="pill ${FST[f.status][1]}">${FST[f.status][0]}</span></div>
+   <div class="dlist">${list.length?list.map(f=>`<div class="ditem" data-a="selForm" data-id="${f.id}" aria-current="${f.id===S.selForm}" tabindex="0"><div class="row"><b class="grow">${esc(FT[f.type].name)}</b><span class="pill ${fSt(f)[1]}">${fSt(f)[0]}</span></div>
      <div class="k">Ngày ${esc(fdate(f.date))}${f.src?" · "+esc(f.src):""}</div><div class="num">${formSummary(f)}</div></div>`).join(""):`<div class="empty">Tháng này chưa có biên bản. Bấm nút ＋ phía trên để lập.</div>`}</div>
 </div>`;
   if(!sel)return`<div class="split">${left}<div class="panel empty">Chọn tháng có biên bản hoặc lập biên bản mới.</div></div>`;
@@ -1393,6 +1415,7 @@ function pagesViewer(pages,pi){return pages.length?`<div class="viewer"><div cla
 /* ---------- Lập / sửa biên bản ---------- */
 function blankForm(type){const st=S.settings||{};const T=FT[type];const prev=S.forms.filter(f=>f.type===type).sort((a,b)=>b.date.localeCompare(a.date))[0];
   const f={id:"f_"+uid(),mod:T.mod,type,date:today(),month:curYM(),status:"draft",src:"Lập trên app",h:prev?clone(prev.h):{},rows:[]};
+  {const dn=st.kkNames||{};["qlts","giamsat"].forEach(k=>{if(dn[k])f.h[k]=dn[k];});}
   if(["quy_rap","quy_fb","float","du_thieu"].includes(type)){f.rows=DENOMS.map(d=>({denom:d,sl:0,gc:""}));f.h.note="";}
   if(type==="voucher"){f.rows=prev?prev.rows.map(r=>({loai:r.loai,sl:r.sl,series:r.series})):[];f.h.tonden=today();}
   if(type==="dong_phuc")f.rows=prev?prev.rows.map(r=>({ma:r.ma,ten:r.ten,dvt:r.dvt,xnt:r.tt,tt:"",gt:""})):[];
@@ -1409,7 +1432,8 @@ function suggestTT(m){const lm=ymAdd(m,-1);const has=new Set(S.inv.filter(i=>i.s
     prev.rows.filter(r=>/ước tính/i.test(r.ref)).forEach(r=>{if(rows.some(x=>x.vendor===r.vendor&&x.ifc===r.ifc&&x.pre===r.pre))return;rows.push(Object.assign({},r,{desc:bump(r.desc),ref:"Chưa có HĐ (ước tính)"}));});}
   return rows;}
 const ymDiff=(a,b)=>(+b.slice(0,4)-+a.slice(0,4))*12+(+b.slice(5)-+a.slice(5));
-function formEditor(){const f=S.fedit;if(!f)return"";const T=FT[f.type];const inp=(k,v,attr)=>`<input data-f="${k}" value="${esc(v??"")}" ${attr||""}>`;const h=f.h||{};
+function formEditor(){const f=S.fedit;if(!f)return"";const T=FT[f.type];const inp=(k,v,attr)=>`<input data-f="${k}" value="${esc(v??"")}" ${attr||""}>`;const h=f.h||{};const dn=(S.settings||{}).kkNames||{};
+  const nameF=(k,l)=>{const ch=(h[k]||"")!==(dn[k]||"");return`<label class="f">${l}<span class="row" style="gap:6px;flex-wrap:nowrap">${inp("h."+k,h[k])}${ch&&h[k]?`<button class="b sm p" data-a="kkName" data-k="${k}" title="Lưu làm tên mặc định cho các biên bản sau">Lưu</button>`:""}</span></label>`;};
   let head=`<div class="grid"><label class="f">Ngày lập${inp("date",f.date,'type="date"')}</label>`;let body="";
   if(["quy_rap","quy_fb","float","du_thieu"].includes(f.type)){head+=`<label class="f">TG bắt đầu${inp("h.tgbd",hm5(h.tgbd),'type="time"')}</label><label class="f">TG kết thúc${inp("h.tgkt",hm5(h.tgkt),'type="time"')}</label><label class="f">Quỹ${inp("h.quy",h.quy)}</label><label class="f">CM${inp("h.cm",h.cm)}</label><label class="f">QAQC${inp("h.qaqc",h.qaqc)}</label><label class="f">Giám sát${inp("h.gs",h.gs)}</label>${f.type==="du_thieu"?`<label class="f">Thời gian (tháng)${inp("h.thang",h.thang)}</label>`:""}`;
     body=`<table class="t"><thead><tr><th>Loại tiền</th><th class="n">Số lượng</th><th class="n">Thành tiền</th><th>Ghi chú</th></tr></thead><tbody>${f.rows.map((r,i)=>`<tr><td>${fmt(r.denom)}</td><td class="n"><input data-f="rows.${i}.sl" data-n="1" value="${r.sl||""}" style="width:100px;text-align:right"></td><td class="n">${fmt(r.denom*(+r.sl||0))}</td><td><input data-f="rows.${i}.gc" value="${esc(r.gc||"")}" style="width:100%"></td></tr>`).join("")}<tr class="tot"><td>Tổng cộng</td><td></td><td class="n">${fmt(cashTotal(f))}</td><td></td></tr></tbody></table>
@@ -1418,9 +1442,9 @@ function formEditor(){const f=S.fedit;if(!f)return"";const T=FT[f.type];const in
     body=rowsTable(f,[["loai","Phân loại"],["sl","Số lượng tồn","n"],["series","Số series (mỗi dải 1 dòng)","ta"]]);}
   if(f.type==="dong_phuc"){head+=`<label class="f">TG bắt đầu${inp("h.tgbd",hm5(h.tgbd),'type="time"')}</label><label class="f">TG kết thúc${inp("h.tgkt",hm5(h.tgkt),'type="time"')}</label><label class="f">CM${inp("h.cm",h.cm)}</label><label class="f">COS${inp("h.cos",h.cos)}</label>`;
     body=rowsTable(f,[["ma","Mã"],["ten","Mặt hàng"],["dvt","ĐVT"],["xnt","SL báo cáo XNT","n"],["tt","SL thực tế","n"],["gt","Giải trình"]]);}
-  if(f.type==="fb_dem"){head+=`<label class="f">TG bắt đầu${inp("h.tgbd",h.tgbd)}</label><label class="f">TG kết thúc${inp("h.tgkt",h.tgkt)}</label><label class="f">Quản lý tài sản${inp("h.qlts",h.qlts)}</label><label class="f">Kế toán${inp("h.ketoan",h.ketoan)}</label><label class="f">Giám sát${inp("h.giamsat",h.giamsat)}</label>`;
+  if(f.type==="fb_dem"){head+=`<label class="f">TG bắt đầu${inp("h.tgbd",h.tgbd)}</label><label class="f">TG kết thúc${inp("h.tgkt",h.tgkt)}</label>${nameF("qlts","Quản lý tài sản")}<label class="f">Kế toán${inp("h.ketoan",h.ketoan)}</label>${nameF("giamsat","Giám sát")}`;
     body=`<label class="f">Ý kiến của Giám sát<textarea data-f="h.ykien" rows="2">${esc(h.ykien||"")}</textarea></label>`+rowsTable(f,[["ma","Mã hàng",h.svId?"fbcode":""],["ten","Tên hàng"],["dvt","ĐVT"]].concat(h.svId?[["vsys","Vista: tồn cuối · lệch KK","ro",r=>r._v?`${fmtQ(r._v.close)}${r._v.var?` · <b>${r._v.var>0?"+":""}${fmtQ(r._v.var)}</b>`:""}`:r._new?"":"không có trên báo cáo"]]:[]).concat([["sl","SL thực tế","n"],["hh","Hư hỏng"],["gcl","Giảm CL"],["hsd","HSD","date"],["gc","Ghi chú"]]));}
-  if(f.type==="fb_dc"){head+=`<label class="f">TG bắt đầu${inp("h.tgbd",h.tgbd)}</label><label class="f">TG kết thúc${inp("h.tgkt",h.tgkt)}</label><label class="f">Quản lý tài sản${inp("h.qlts",h.qlts)}</label><label class="f">Giám sát${inp("h.giamsat",h.giamsat)}</label>`;
+  if(f.type==="fb_dc"){head+=`<label class="f">TG bắt đầu${inp("h.tgbd",h.tgbd)}</label><label class="f">TG kết thúc${inp("h.tgkt",h.tgkt)}</label>${nameF("qlts","Quản lý tài sản")}${nameF("giamsat","Giám sát")}`;
     {const o=kyOf(f.date);const sv=o&&kySv(o.ym,o.k);body=sv?`<div class="row"><button class="b g" data-a="dcSv" data-k="${sv.id}">↻ Gợi ý từ báo cáo Vista kỳ ${fdate(sv.date)}</button></div>`:"";}
     body+=rowsTable(f,[["ma","Mã hàng","fbcode"],["ten","Tên hàng"],["dvt","ĐVT"],["loai","Tăng/Giảm","sel:Tăng,Giảm"],["sl","Số lượng","n"],["ngay","Ngày phát sinh","date"],["lydo","Lý do","sel:Nhập hàng chuyển rạp,Hủy cuối ngày,Hết hạn sử dụng,Hư hỏng do vận hành,Hư hỏng do nhà cung cấp,Khác"]]);}
   if(f.type==="tich_truoc"){head+=`<label class="f">Bộ phận${inp("h.boPhan",h.boPhan)}</label><label class="f">Dự án${inp("h.duAn",h.duAn)}</label><label class="f">Người đề nghị${inp("h.nguoiDN",h.nguoiDN)}</label><label class="f">Người duyệt${inp("h.nguoiDuyet",h.nguoiDuyet)}</label>`;
@@ -1429,11 +1453,14 @@ function formEditor(){const f=S.fedit;if(!f)return"";const T=FT[f.type];const in
   return`<div class="row"><span class="ttl grow" style="font-size:16px">${esc(T.name)}</span><button class="b" data-a="closeForm">Đóng</button></div>
    <div class="panel">${head}${body}<div class="checks">${cs.map(c=>`<div><span class="pill ${{bad:"bad",warn:"warn",inf:"inf",ok:"ok"}[c.lv]}">${{bad:"Lỗi",warn:"Cảnh báo",inf:"Thông tin",ok:"Khớp"}[c.lv]}</span><span>${esc(c.t)}</span></div>`).join("")}</div>
    <div class="row"><button class="b p" data-a="saveForm">Lưu biên bản</button>${S.forms.some(x=>x.id===f.id)&&f.status!=="signed"?`<button class="b d" data-a="delForm">${S.arm==="delf"?"Bấm lần nữa để xóa":"Xóa"}</button>`:""}</div></div>`;}
+/* nhập ngày bằng tay: 31/12/2026, 31-12-26, 311226, 31122026 → 2026-12-31; sai thì giữ nguyên để báo */
+function dmyIn(x){x=String(x||"").trim();if(!x)return"";let m=x.match(/^(\d{1,2})\D+(\d{1,2})\D+(\d{2}|\d{4})$/)||x.match(/^(\d{2})(\d{2})(\d{2}|\d{4})$/);
+  if(!m)return x;let [_,d,mo,y]=m;if(y.length===2)y="20"+y;d=+d;mo=+mo;if(mo<1||mo>12||d<1||d>31)return x;return`${y}-${pad2(mo)}-${pad2(d)}`;}
 function rowsTable(f,cols){return`<div class="scroll tall"><table class="t"><thead><tr><th>#</th>${cols.map(c=>`<th>${esc(c[1])}</th>`).join("")}<th></th></tr></thead><tbody>${f.rows.map((r,i)=>`<tr><td>${i+1}</td>${cols.map(c=>{const k=`rows.${i}.${c[0]}`,v=r[c[0]]??"",t=c[2]||"";
    if(t==="ro")return`<td class="n k" style="white-space:nowrap">${c[3]?c[3](r):esc(v)}</td>`;
    if(t==="ta")return`<td><textarea data-f="${k}" rows="2" style="min-width:180px">${esc(v)}</textarea></td>`;
    if(t.startsWith("sel:"))return`<td><select data-f="${k}"><option></option>${t.slice(4).split(",").map(o=>`<option ${o===v?"selected":""}>${esc(o)}</option>`).join("")}</select></td>`;
-   if(t==="date")return`<td><input type="date" data-f="${k}" value="${/^\d{4}-/.test(v)?esc(v):""}" title="${esc(v)}"></td>`;
+   if(t==="date")return`<td><input data-f="${k}" data-dt="1" inputmode="numeric" placeholder="dd/mm/yyyy" style="width:118px" value="${esc(/^\d{4}-\d{2}-\d{2}$/.test(v)?v.slice(8)+"/"+v.slice(5,7)+"/"+v.slice(0,4):v)}"></td>`;
    if(t==="fbcode")return`<td><input data-f="${k}" list="fbcodes" value="${esc(v)}" style="width:150px"></td>`;
    if(t==="vendor")return`<td><input data-f="${k}" value="${esc(v)}" style="width:110px"></td>`;
    return`<td><input data-f="${k}" ${t==="n"?'data-n="1" style="width:100px;text-align:right"':'style="min-width:90px"'} value="${esc(t==="n"&&v!==""&&v!==null?String(v):v)}"></td>`;}).join("")}<td><button class="b sm" data-a="rmRow" data-k="${i}">✕</button></td></tr>`).join("")}
@@ -1457,10 +1484,12 @@ function inPlan(p,ym,k){if(!p||!p[k])return false;const ms=String(p.months||"").
 const FRANK={signed:3,printed:2,draft:1};
 function kyForm(type,ym,k){let best=null;S.forms.forEach(f=>{if(f.type!==type)return;const o=kyOf(f.date);if(!o||o.ym!==ym||o.k!==k)return;if(!best||FRANK[f.status]>FRANK[best.status])best=f;});return best;}
 function kySv(ym,k){return S.scans.filter(x=>{if(!x.sv)return false;const o=kyOf(x.date);return o&&o.ym===ym&&o.k===k;}).sort((a,b)=>(b.at||"").localeCompare(a.at||""))[0];}
-function kyScan(type,ym,k){return S.scans.filter(x=>{if(x.ftype!==type)return false;const o=kyOf(x.date);return o&&o.ym===ym&&o.k===k;}).sort((a,b)=>(b.signed2?1:0)-(a.signed2?1:0)||(b.at||"").localeCompare(a.at||""))[0];}
-function kyState(type,ym,k,P){const f=kyForm(type,ym,k);const d=kyDates(ym)[k];const t=today();const sc=kyScan(type,ym,k);
-  if(f&&f.status==="signed")return{f,sc,lv:"ok",lbl:"Đã ký",sym:"✓"};
-  if(sc&&sc.signed2)return{f,sc,lv:"ok",lbl:"Đã ký (bản scan)",sym:"✓"};
+const fSt=f=>FT[f.type]?.mod==="kk"&&f.status==="signed"&&!S.scans.some(x=>x.linkId===f.id&&x.signed2)?["Chờ xác nhận đủ 2 chữ ký","inf"]:FST[f.status];
+function kyScan(type,ym,k,f){return S.scans.filter(x=>{if(f&&x.linkId===f.id)return true;if(x.ftype!==type)return false;const o=kyOf(x.date);return o&&o.ym===ym&&o.k===k;}).sort((a,b)=>(b.signed2?1:0)-(a.signed2?1:0)||(b.at||"").localeCompare(a.at||""))[0];}
+function kyState(type,ym,k,P){const f=kyForm(type,ym,k);const d=kyDates(ym)[k];const t=today();const sc=kyScan(type,ym,k,f);
+  /* chỉ tính Đã ký khi có bản scan đã xác nhận đủ 2 chữ ký */
+  if(sc&&sc.signed2)return{f,sc,lv:"ok",lbl:"Đã ký (bản scan đủ 2 chữ ký)",sym:"✓"};
+  if(f&&f.status==="signed")return{f,sc,lv:"inf",lbl:sc?"Có bản scan, chưa xác nhận đủ 2 chữ ký":"Chưa có bản scan đã ký",sym:"◐"};
   if(sc)return{f,sc,lv:"inf",lbl:"Có bản scan, chưa đủ 2 chữ ký",sym:"◐"};
   if(f)return{f,lv:FST[f.status][1],lbl:FST[f.status][0],sym:"◐"};
   if(ym<(P.start||"0000"))return{lv:"",lbl:"Chưa theo dõi trên app",sym:"–"};
@@ -1477,7 +1506,7 @@ function vKkPlan(){const ym=curYM(),y=ym.slice(0,4),P=kkPlan(),D=kyDates(ym),t=t
        <td class="n" style="width:190px">${s.sc?`<button class="b sm" data-a="kkScanGo" data-id="${s.sc.id}">Xem scan</button> `:""}${s.f?`<button class="b sm" data-a="kkView" data-id="${s.f.id}">Xem</button>`:s.sc?"":(x==="fb_dem"||x==="fb_dc")&&sv?`<button class="b sm p" data-a="kkSv" data-k="${x}" data-id="${sv.id}">＋ Lập từ báo cáo Vista</button>`:`<button class="b sm" data-a="kkNew" data-k="${x}" data-d="${d}">＋ Lập</button>`}</td></tr>`).join("")||`<tr><td class="empty">Kỳ này không có biên bản nào trong kế hoạch.</td></tr>`}</tbody></table>
      ${extra.length?`<div class="k">Phát sinh ngoài kế hoạch: ${extra.map(f=>`<a href="#" data-a="kkView" data-id="${f.id}">${esc(FT[f.type].name)} ${fdate(f.date)}</a>`).join(", ")}</div>`:""}</div>`;};
   const rows=kk.filter(x=>P[x]&&(P[x].mid||P[x].end));
-  const cell=(x,m,k)=>{const ymm=`${y}-${pad2(m)}`;if(!inPlan(P[x],ymm,k))return`<span class="mk"></span>`;const s=kyState(x,ymm,k,P);const tl=`${esc(FT[x].name)} · ${fdate(kyDates(ymm)[k])}: ${esc(s.lbl)}`;return s.f?`<button class="mk ${s.lv}" data-a="kkView" data-id="${s.f.id}" title="${tl} – bấm để mở biên bản">${s.sym}</button>`:s.sc?`<button class="mk ${s.lv}" data-a="kkScanGo" data-id="${s.sc.id}" title="${tl} – bấm để mở bản scan">${s.sym}</button>`:`<span class="mk ${s.lv}" title="${tl}">${s.sym}</span>`;};
+  const cell=(x,m,k)=>{const ymm=`${y}-${pad2(m)}`;if(!inPlan(P[x],ymm,k))return`<span class="mk"></span>`;const s=kyState(x,ymm,k,P);const tl=`${esc(FT[x].name)} · ${fdate(kyDates(ymm)[k])}: ${esc(s.lbl)}`;return s.sc?`<button class="mk ${s.lv}" data-a="kkScanGo" data-id="${s.sc.id}" title="${tl} – bấm để mở bản scan">${s.sym}</button>`:s.f?`<button class="mk ${s.lv}" data-a="kkView" data-id="${s.f.id}" title="${tl} – bấm để mở biên bản">${s.sym}</button>`:`<span class="mk ${s.lv}" title="${tl}">${s.sym}</span>`;};
   const pe=S.planEdit;
   const editor=pe?`<div class="panel"><div class="row"><span class="ttl grow">Sửa kế hoạch kiểm kê định kỳ</span><button class="b" data-a="planCancel">Hủy</button><button class="b p" data-a="planSave">Lưu kế hoạch</button></div>
     <table class="t"><thead><tr><th>Biên bản</th><th class="c">Kỳ ngày 15</th><th class="c">Kỳ cuối tháng</th><th>Chỉ làm vào các tháng (để trống = mọi tháng)</th></tr></thead><tbody>
@@ -1818,10 +1847,10 @@ function bind(){setTimeout(hbars,0);setTimeout(hydrateImgs,0);
   const kf=$("#kpFile");if(kf)kf.onchange=()=>{if(kf.files[0])importKP(kf.files[0]);kf.value="";};
 }
 document.addEventListener("change",e=>{const pe=e.target.closest("[data-pe]");if(pe&&S.planEdit){const k=pe.dataset.pe.split(".");if(k.length===1)S.planEdit[k[0]]=pe.value;else{S.planEdit[k[0]]=Object.assign({},S.planEdit[k[0]]);S.planEdit[k[0]][k[1]]=pe.type==="checkbox"?(pe.checked?1:0):pe.value;}return;}
-  const ff=e.target.closest("[data-f]");if(ff&&S.fedit){let v=ff.value;if(ff.dataset.n)v=v===""?"":num(v);setPath(S.fedit,ff.dataset.f,v);
+  const ff=e.target.closest("[data-f]");if(ff&&S.fedit){let v=ff.value;if(ff.dataset.n)v=v===""?"":num(v);if(ff.dataset.dt)v=dmyIn(v);setPath(S.fedit,ff.dataset.f,v);
     if(S.fedit.type==="fb_dc"&&/rows\.\d+\.ma$/.test(ff.dataset.f)){const i=+ff.dataset.f.split(".")[1];const it=FB_ITEMS.find(x=>x[0]===v);if(it){S.fedit.rows[i].ten=it[1];S.fedit.rows[i].dvt=it[2];}}
     if(S.fedit.type==="tich_truoc"&&/rows\.\d+\.vendor$/.test(ff.dataset.f)){const i=+ff.dataset.f.split(".")[1];const vv=S.byNo.get(String(v).trim());if(vv)S.fedit.rows[i].vname=vv[1];}
-    const md=$("#modal"),y=md.scrollTop;renderModal();bind();md.scrollTop=y;return;}
+    const md=$("#modal"),y=md.scrollTop;const sp=[...md.querySelectorAll(".scroll")].map(e=>[e.scrollTop,e.scrollLeft]);renderModal();bind();md.scrollTop=y;md.querySelectorAll(".scroll").forEach((e,i)=>{if(sp[i]){e.scrollTop=sp[i][0];e.scrollLeft=sp[i][1];}});return;}
   const rr=e.target.closest("[data-r]");if(rr&&S.scanEdit?.rev){const r=S.scanEdit.rev[+rr.dataset.r];if(r){const k=rr.dataset.rf;r[k]=rr.type==="checkbox"?rr.checked:rr.value;if(k==="type"&&!rr.value)r.ok2=false;renderModal();bind();}return;}
   const ss=e.target.closest("[data-s]");if(ss&&S.scanEdit){S.scanEdit[ss.dataset.s]=ss.value;if(ss.dataset.s==="month"&&ss.value){S.scanEdit.linkId="";if(S.scanEdit.date&&!S.scanEdit.date.startsWith(ss.value))S.scanEdit.date="";renderModal();bind();}return;}
   const el=e.target.closest("[data-e]");if(!el)return;const d=S.edit.get(el.dataset.id);if(!d)return;const k=el.dataset.e;
@@ -1880,6 +1909,8 @@ document.addEventListener("click",async e=>{const b=e.target.closest("[data-a]")
   else if(a==="errDel"){const key=b.dataset.k+":"+id;const v=(document.querySelector(`[data-errpw="${CSS.escape(key)}"]`)||{}).value||"";if(v!==ERR_PWD){toast("Sai mật khẩu xóa.","bad");return;}delete S.errView[key];await delErr(b.dataset.k,id);render();}
   else if(a==="kkRevSave")kkRevSave(+b.dataset.k);
   else if(a==="kkRevDrop"){S.scanEdit.rev.splice(+b.dataset.k,1);renderModal();bind();}
+  else if(a==="kkName"){const k=b.dataset.k;const st=clone(S.settings||{});st.kkNames=Object.assign({},st.kkNames||{},{[k]:S.fedit.h[k]||""});await Store.setSettings(st);
+    if(S.forms.some(x=>x.id===S.fedit.id))await Store.put("forms",S.fedit.id,clone(S.fedit));toast(`Đã lưu "${S.fedit.h[k]}" làm tên mặc định.`);renderModal();bind();}
   else if(a==="kkScanGo"){const x=S.scans.find(y=>y.id===id);if(x){$("#year").value=x.month.slice(0,4);$("#mon").value=String(+x.month.slice(5));S.msub.kk="scan";S.selScan=id;S.arcPage=0;render();}}
   else if(a==="kkRecog"){const x=S.scans.find(y=>y.id===id);if(!x)return;S.scanEdit={mod:"kk",type:"Biên bản kiểm kê đã ký",month:x.month,rev:[],msg:"Đang tải file gốc…"};render();
     try{const bl=await getFileBlob(x.file.url);const f=new File([bl],x.file.name||"scan.pdf",{type:bl.type||(/\.pdf$/i.test(x.file.name||"")?"application/pdf":"image/jpeg")});await kkScanFiles([f],x.id);}catch(e){S.scanEdit.msg="Không mở được file gốc: "+(e.message||e);S.scanEdit.err=true;renderModal();bind();}}
@@ -1901,6 +1932,14 @@ document.addEventListener("click",async e=>{const b=e.target.closest("[data-a]")
   else if(a==="addItem"){S.edit.get(id).items.push({desc:"",amount:0,vatRate:null,hm:""});renderModal();bind();}
   else if(a==="rmItem"){S.edit.get(id).items.splice(+b.dataset.k,1);renderModal();bind();}
   else if(a==="dq"){S.queue=S.queue.filter(q=>q.id!==id);render();}
+  else if(a==="openRef"){const k=b.dataset.k;if(k==="dnc"){const d=S.dnc.find(x=>x.id===id);if(!d)return toast("Không còn bản này trên app.","bad");S.modal=false;setYM(d.month);S.tab="dnc";syncTabs();S.sub="list";S.selDnc=id;render();window.scrollTo(0,0);return;}
+    const o=(k==="inv"?S.inv:S.docs).find(x=>x.id===id);if(!o)return toast("Không còn bản này trên app (có thể đã chuyển vào bảng lỗi).","bad");
+    if(k==="inv"&&o.status!=="confirmed"){S.openG.add(o.gid||o.id);render();return;}
+    S.modal=false;setYM(o.month||curYM());S.tab="dnc";syncTabs();S.sub="archive";S.errView._dnc=false;S.arcOpen.add((o.seller?.name||"").trim()||NO_NCC);S.selArc=id;S.arcPage=0;S.arcView="pages";render();window.scrollTo(0,0);}
+  else if(a==="linkDnc"){const o=S.docs.find(x=>x.id===b.dataset.k);const dn=S.dnc.find(x=>x.id===id);if(!o||!dn)return;
+    if(S.arm!=="ld"+id){S.arm="ld"+id;b.textContent="Bấm lần nữa để gắn";setTimeout(()=>{if(S.arm==="ld"+id){S.arm=null;render();}},4000);return;}S.arm=null;
+    await Store.put("dnc",dn.id,Object.assign({},dn,{status:"signed",signedPage:(o.file?.pages||[])[o.dncPage||0]||"",signedUrl:o.file?.url||"",signedAt:nowIso(),signedNote:"Gắn tay từ "+(o.file?.name||"bản scan")}));
+    await Store.del("docs",o.id);await Store.addHist({at:nowIso(),summary:`Gắn ĐNC đã ký (${o.file?.name||""}) vào ĐNC ${dn.ifc} tháng ${ymLbl(dn.month)}`});S.selArc=null;toast(`Đã gắn vào ĐNC ${dn.ifc} tháng ${ymLbl(dn.month)}, ĐNC chuyển sang Đã ký.`);render();}
   else if(a==="sel"){S.selDnc=id;S.showRender=null;render();}
   else if(a==="toggleRender"){S.showRender=S.showRender===id?null:id;render();}
   else if(a==="print")printDncs([S.dnc.find(x=>x.id===id)]);
