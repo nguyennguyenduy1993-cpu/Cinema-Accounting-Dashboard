@@ -30,6 +30,9 @@ window.APP_CONFIG = {
 </script>
 <style>
 /* Layout theo Galaxy Roster Dashboard: tên rạp góc trái, thẻ công cụ (Năm, Tháng, tab), nội dung trong thẻ trắng bo 16px. Giao diện sáng cố định như bản gốc. */
+.bbg{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 16px;margin-top:8px}.bbg .wide{grid-column:1/-1}.bbg .hint{font-size:11px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)}@media(max-width:640px){.bbg{grid-template-columns:1fr}}
+#hoTbl td{vertical-align:middle}.dupbox{margin-top:8px;padding:8px 10px;border:1px solid var(--bad-line);background:var(--bad-bg);border-radius:8px;font-size:13px;line-height:1.9}
+.dd{position:relative;display:inline-block}.ddm{position:absolute;right:0;top:calc(100% + 4px);z-index:60;background:var(--panel);border:1px solid var(--line2);border-radius:10px;box-shadow:0 10px 28px rgb(0 0 0/.14);min-width:270px;max-height:70vh;overflow:auto;padding:6px}.ddh{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;padding:8px 10px 4px}.ddi{display:flex;gap:6px;align-items:center;width:100%;text-align:left;background:none;border:0;padding:8px 10px;border-radius:6px;font:inherit;font-size:14px;color:var(--fg);cursor:pointer}.ddi:hover,.ddi:focus-visible{background:var(--soft)}
 :root{
   color-scheme:light;
   --bg:oklch(0.97 0.006 250); --panel:#ffffff; --fg:oklch(0.22 0.02 250); --muted:oklch(0.5 0.02 250);
@@ -454,45 +457,75 @@ const HO_MASTER=(readJson("seedHO")||[]).map(x=>({code:x[0],name:x[1],dvt:x[2],a
 const HOK=s=>String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/đ/gi,"d").toLowerCase().replace(/[^a-z0-9]+/g,"");
 const HO_RULE=/^HO[A-Z0-9]{2,13}$/;
 let _hoIx=null,_hoSig="";
-function hoIx(){const ho=S.ho||{add:{},map:{}};const sig=JSON.stringify(ho);if(_hoIx&&_hoSig===sig)return _hoIx;_hoSig=sig;
-  const list=HO_MASTER.concat(Object.values(ho.add||{}).filter(x=>x&&x.code).map(x=>({code:x.code,name:x.name,dvt:x.dvt||"",alt:[],src:"tay",by:x.by,at:x.at})));
+function hoIx(){const ho=S.ho||{};const sig=JSON.stringify([ho.add,ho.map,ho.edit,ho.ren]);if(_hoIx&&_hoSig===sig)return _hoIx;_hoSig=sig;
+  const ed=ho.edit||{};
+  const list=HO_MASTER.map(x=>{const o=ed[x.code];return o?{code:o.code,name:o.name,dvt:o.dvt||"",alt:[x.name].concat(x.alt),src:"sua",mkey:x.code,by:o.by,at:o.at}:Object.assign({mkey:x.code},x);})
+    .concat(Object.values(ho.add||{}).filter(x=>x&&x.code).map(x=>({code:x.code,name:x.name,dvt:x.dvt||"",alt:x.alt||[],src:"tay",by:x.by,at:x.at})));
   const code=new Map(),name=new Map();list.forEach(x=>{if(!code.has(x.code))code.set(x.code,x);[x.name].concat(x.alt).forEach(n=>{const k=HOK(n);if(!k)return;if(!name.has(k))name.set(k,new Set());name.get(k).add(x.code);});});
-  return _hoIx={list,code,name,map:ho.map||{}};}
-const hoGet=c=>hoIx().code.get(String(c||"").trim().toUpperCase());
+  return _hoIx={list,code,name,map:ho.map||{},ren:ho.ren||{}};}
+const hoFol=c=>{const r=hoIx().ren;let x=String(c||"").trim().toUpperCase();for(let i=0;i<6&&r[x];i++)x=r[x];return x;};
+const hoGet=c=>hoIx().code.get(hoFol(c));
 function hoBig(s){const k=HOK(s),o=new Map();for(let i=0;i<k.length-1;i++){const g=k.slice(i,i+2);o.set(g,(o.get(g)||0)+1);}return[o,Math.max(1,k.length-1)];}
 function hoSug(ten,n){const[a,la]=hoBig(ten);if(la<2)return[];const sc=x=>{let best=0;[x.name].concat(x.alt).forEach(nm=>{const[b,lb]=hoBig(nm);let m=0;a.forEach((v,g)=>m+=Math.min(v,b.get(g)||0));best=Math.max(best,2*m/(la+lb));});return best;};
   return hoIx().list.map(x=>[x,sc(x)]).filter(z=>z[1]>=0.55).sort((p,q)=>q[1]-p[1]).slice(0,n||3).map(z=>z[0]);}
-/* Master là chuẩn: mã đã chọn/nhớ → tên khớp Master → mã cũ còn trong danh mục → giữ mã cũ (gắn cờ) → để trống */
-function hoResolve(ten,ma){const X=hoIx(),k=HOK(ten),m=String(ma||"").trim().toUpperCase();
-  if(k&&X.map[k]&&X.code.has(X.map[k]))return{code:X.map[k],st:"ok"};
+/* Master là chuẩn: mã đã chọn/nhớ → tên khớp danh mục → mã cũ còn trong danh mục (theo mã đổi tên) → giữ mã cũ (gắn cờ) → để trống */
+function hoResolve(ten,ma){const X=hoIx(),k=HOK(ten),m=hoFol(ma);
+  if(k&&X.map[k]&&X.code.has(hoFol(X.map[k])))return{code:hoFol(X.map[k]),st:"ok"};
   const c=k&&X.name.get(k);if(c&&c.size===1)return{code:[...c][0],st:"ok"};
   if(m&&X.code.has(m))return{code:m,st:"ok"};
   if(m&&/^[A-Z]/.test(m))return{code:m,st:"out"};
   return{code:"",st:"miss"};}
-function hoSt(r){const m=String(r.ma||"").trim();if(!m||/^\d+$/.test(m))return"miss";return hoGet(m)?"ok":"out";}
-function hoFix(f){if(!f||!["fb_dem","fb_dc"].includes(f.type))return 0;let n=0;(f.rows||[]).forEach(r=>{if(r._hoTay)return;const x=hoResolve(r.ten,r.ma);if(x.code!==String(r.ma||"")){r.ma=x.code;n++;}});return n;}
-async function hoSave(path,val){if(!S.ho)S.ho={add:{},map:{}};const[a,b]=path.split("/");S.ho[a]=Object.assign({},S.ho[a]);if(val===null)delete S.ho[a][b];else S.ho[a][b]=val;_hoIx=null;
-  if(!DEMO){try{await firebase.database().ref("ctr/_shared/ho/"+path).set(val);}catch(e){toast("Chưa lưu được mã HO lên hệ thống: "+(e.message||e),"bad");throw e;}}}
-function vHo(){const e=S.hoEdit;if(!e)return"";const X=hoIx(),q=HOK(e.q||"");const tay=X.list.filter(x=>x.src==="tay");
-  const hits=q?X.list.filter(x=>HOK(x.code+x.name).includes(q)).slice(0,40):[];
-  const c=String(e.code||"").trim().toUpperCase(),dupC=c&&hoGet(c),dupN=e.name&&X.name.get(HOK(e.name));
-  return`<div class="panel"><div class="row"><span class="ttl grow">Mã HO cho item F&amp;B</span><button class="b" data-a="hoClose">Đóng</button></div>
-  <div class="k" style="line-height:1.6"><b>Nguyên tắc thêm mã mới</b><br>
-  1. Chỉ thêm khi item chưa có trong Master data (${HO_MASTER.length} mã, F&amp;B ORDER LIST cập nhật 29/10/2026). Tìm trước ở ô bên dưới, có rồi thì dùng mã đó.<br>
+function hoSt(r){const m=String(r.ma||"").trim();if(!m||/^\d+$/.test(m))return"miss";return hoIx().code.has(m)?"ok":"out";}
+function hoFix(f,o){if(!f||!["fb_dem","fb_dc"].includes(f.type))return 0;let n=0;(f.rows||[]).forEach(r=>{const old=String(r.ma||"");let nc;
+  if(r._hoTay){nc=old?hoFol(old):old;}else{nc=hoResolve(r.ten,r.ma).code;if(o?.keepMiss&&!nc)nc=old;}
+  if(nc!==old){r.ma=nc;n++;}});return n;}
+/* Liên kết mã mới/mã sửa sang mọi biên bản F&B đã lưu của rạp (kể cả đã ký: ghi chú cập nhật sau ký) */
+let _hoRl=false,_hoRlT=0;
+async function hoRelinkAll(){if(_hoRl||!S.forms)return 0;_hoRl=true;let n=0;try{for(const f0 of S.forms.filter(f=>["fb_dem","fb_dc"].includes(f.type))){const f=clone(f0);const c=hoFix(f,{keepMiss:1});if(!c)continue;
+    if(f.status==="signed"){f.h=Object.assign({},f.h,{hoAfterSign:today()});}await Store.put("forms",f.id,f);n++;}}catch(e){console.warn(e);}finally{_hoRl=false;}return n;}
+function hoAutoRelink(){clearTimeout(_hoRlT);_hoRlT=setTimeout(async()=>{if(S.ho&&S._loadedAll&&S.forms){const n=await hoRelinkAll();if(n)render();}},2500);}
+function vHo(){const e=S.hoEdit;if(!e)return"";const X=hoIx(),lst=X.list.slice().sort((a,b)=>a.code.localeCompare(b.code));const nT=lst.filter(x=>x.src==="tay").length,nS=lst.filter(x=>x.src==="sua").length;
+  const c=String(e.code||"").trim().toUpperCase(),dupC=c&&X.code.get(c),dupN=e.name&&X.name.get(HOK(e.name));
+  const dupL=dupN?[...dupN].map(k=>X.code.get(k)).filter(z=>z&&z.code!==c):[];const ok=c&&HO_RULE.test(c)&&!dupC&&String(e.name||"").trim()&&!dupL.length;
+  const srcL={master:"Master",sua:"Master · đã sửa",tay:"Thêm tay"};
+  const ee=e.ed;const eC=ee?String(ee.code||"").trim().toUpperCase():"",eDup=ee&&eC!==ee.orig&&X.code.get(eC),eOk=ee&&HO_RULE.test(eC)&&!eDup&&String(ee.name||"").trim();
+  const log=Object.values((S.ho||{}).log||{}).sort((a,b)=>String(b.at).localeCompare(String(a.at))).slice(0,15);
+  return`<div class="panel"><div class="row"><span class="ttl grow">Danh mục mã HO · ${lst.length} mã <span class="k">(${HO_MASTER.length} Master · ${nS} đã sửa · ${nT} thêm tay)</span></span>${e.mode!=="add"?`<button class="b p" data-a="hoMode" data-k="add">＋ Thêm mã mới</button>`:""}<button class="b" data-a="hoClose">Đóng</button></div>
+  <details style="margin:6px 0"><summary class="k" style="cursor:pointer"><b>Nguyên tắc thêm / sửa mã</b></summary><div class="k" style="line-height:1.6;margin-top:4px">
+  1. Tìm trong danh sách trước. Item đã có mã thì dùng mã đó, không thêm mã trùng.<br>
   2. Mã lấy đúng theo mã HO cấp trên Vista/đơn đặt hàng, không tự đặt mã khi HO chưa cấp.<br>
   3. Mã viết hoa, không dấu, không khoảng trắng, bắt đầu bằng HO, tối đa 15 ký tự (ví dụ HOPEPSILON320).<br>
-  4. Tên item ghi giống tên trên báo cáo Vista để app tự khớp ở các kỳ sau. ĐVT ghi theo đơn vị kiểm đếm.<br>
-  5. Mã thêm ở đây dùng chung cho cả 6 rạp, có ghi người thêm. Thêm sai thì xóa và thêm lại.</div>
-  <div class="grid" style="margin-top:8px"><label class="f">Tìm mã / tên item<input data-ho="q" value="${esc(e.q||"")}" placeholder="vd: pepsi, HOTRA"></label></div>
-  ${q?`<div class="scroll" style="max-height:220px"><table class="t"><thead><tr><th>Mã HO</th><th>Tên item</th><th>ĐVT</th><th>Nguồn</th></tr></thead><tbody>${hits.map(x=>`<tr><td><b>${esc(x.code)}</b></td><td>${esc(x.name)}</td><td>${esc(x.dvt)}</td><td class="k">${x.src==="master"?"Master":"Thêm tay"}</td></tr>`).join("")||`<tr><td colspan="4" class="k">Không thấy trong danh mục. Nếu HO đã cấp mã thì thêm ở dưới.</td></tr>`}</tbody></table></div>`:""}
-  <div class="ttl" style="margin-top:10px">Thêm mã mới</div>
-  <div class="grid"><label class="f">Mã HO<input data-ho="code" value="${esc(e.code||"")}" placeholder="HO…" style="text-transform:uppercase"></label><label class="f">Tên item<input data-ho="name" value="${esc(e.name||"")}"></label><label class="f">ĐVT<input data-ho="dvt" value="${esc(e.dvt||"")}"></label></div>
-  ${c&&!HO_RULE.test(c)?`<div class="pill bad">Mã chưa đúng nguyên tắc: bắt đầu bằng HO, chữ in hoa và số, tối đa 15 ký tự.</div>`:""}${dupC?`<div class="pill bad">Mã ${esc(c)} đã có: ${esc(dupC.name)}.</div>`:""}${dupN&&!dupC?`<div class="pill warn">Tên này đã có mã ${esc([...dupN].join(", "))}. Kiểm tra lại trước khi thêm.</div>`:""}
-  <div class="row" style="margin-top:8px"><button class="b p" data-a="hoAdd" ${c&&HO_RULE.test(c)&&!dupC&&String(e.name||"").trim()?"":"disabled"}>＋ Thêm mã</button></div>
-  ${tay.length?`<div class="ttl" style="margin-top:10px">Mã đã thêm tay (${tay.length})</div><table class="t"><thead><tr><th>Mã HO</th><th>Tên item</th><th>ĐVT</th><th>Người thêm</th><th></th></tr></thead><tbody>${tay.map(x=>`<tr><td><b>${esc(x.code)}</b></td><td>${esc(x.name)}</td><td>${esc(x.dvt)}</td><td class="k">${esc(x.by||"")} · ${esc(fdate((x.at||"").slice(0,10)))}</td><td><button class="b sm d" data-a="hoDel" data-k="${esc(x.code)}">${S.arm==="ho"+x.code?"Bấm lần nữa để xóa":"Xóa"}</button></td></tr>`).join("")}</tbody></table>`:""}</div>`;}
+  4. Tên item ghi giống tên trên báo cáo F&amp;B để app tự khớp ở các kỳ sau. ĐVT ghi theo đơn vị kiểm đếm.<br>
+  5. Danh mục dùng chung cho cả 6 rạp. Mỗi lần thêm/sửa đều ghi người sửa, thời gian và mã cũ. Mã mới/mã sửa được cập nhật vào tất cả biên bản F&amp;B đã lập, kể cả biên bản đã ký (có ghi chú cập nhật sau ký).</div></details>
+  ${e.mode==="add"?`<div class="panel" style="background:var(--soft)"><div class="ttl">Thêm mã mới</div><div class="grid"><label class="f">Mã HO<input data-ho="code" value="${esc(e.code||"")}" placeholder="HO…" style="text-transform:uppercase"></label><label class="f">Tên item<input data-ho="name" value="${esc(e.name||"")}"></label><label class="f">ĐVT<input data-ho="dvt" value="${esc(e.dvt||"")}"></label></div>
+   ${c&&!HO_RULE.test(c)?`<div class="pill bad">Mã chưa đúng nguyên tắc: bắt đầu bằng HO, chữ in hoa và số, tối đa 15 ký tự.</div>`:""}${dupC?`<div class="dupbox"><b>Trùng mã:</b> ${esc(c)} đang dùng cho "${esc(dupC.name)}"${dupC.dvt?` (${esc(dupC.dvt)})`:""}.${String(e.name||"").trim()&&(e.name.trim()!==dupC.name||String(e.dvt||"").trim()!==(dupC.dvt||""))?` <button class="b sm d" data-a="hoOver" data-k="${esc(dupC.code)}">Ghi đè tên/ĐVT của ${esc(dupC.code)}</button>`:""}</div>`:""}${!dupC&&dupL.length?`<div class="dupbox"><b>Trùng tên sản phẩm:</b> ${dupL.map(z=>`"${esc(z.name)}" đang có mã <b>${esc(z.code)}</b> <button class="b sm d" data-a="hoOver" data-k="${esc(z.code)}" ${HO_RULE.test(c)?"":"disabled"}>Ghi đè ${esc(z.code)} → ${esc(c||"mã mới")}</button>`).join("<br>")}<div class="k" style="margin-top:4px">Ghi đè: mã cũ được thay bằng mã mới trong danh mục và trong mọi biên bản đã lập.</div></div>`:""}
+   <div class="row" style="margin-top:8px"><button class="b p" data-a="hoAdd" ${ok?"":"disabled"}>Lưu mã mới</button><button class="b" data-a="hoMode" data-k="">Hủy</button></div></div>`:""}
+  ${(()=>{const u=new Map();(S.forms||[]).filter(f=>["fb_dem","fb_dc"].includes(f.type)).forEach(f=>(f.rows||[]).forEach(r=>{if(hoSt(r)==="out"){const k=String(r.ma).trim();if(!u.has(k))u.set(k,{code:k,name:r.ten||"",dvt:r.dvt||"",n:0});u.get(k).n++;}}));const L=[...u.values()].sort((a,b)=>a.code.localeCompare(b.code));
+    return L.length?`<details style="margin:6px 0" ${e.useOpen?"open":""}><summary style="cursor:pointer"><b>Mã đang dùng trong biên bản nhưng chưa có trong danh mục (${L.length})</b> <span class="k">– kiểm tra đúng mã HO cấp rồi bấm Đưa vào danh mục</span></summary><table class="t"><tbody>${L.map(x=>`<tr><td><b>${esc(x.code)}</b></td><td>${esc(x.name)}</td><td>${esc(x.dvt)}</td><td class="k">${x.n} dòng</td><td><button class="b sm" data-a="hoAddFrom" data-k="${esc(x.code)}" data-n="${esc(x.name)}" data-u="${esc(x.dvt)}">＋ Đưa vào danh mục</button></td></tr>`).join("")}</tbody></table></details>`:"";})()}
+  <div class="row" style="margin-top:6px"><input data-hoq value="${esc(e.q||"")}" placeholder="🔎 Gõ mã hoặc tên item để lọc" style="flex:1;min-width:220px"><span class="k" id="hoCnt"></span></div>
+  ${ee&&eDup?`<div class="pill bad">Mã ${esc(eC)} đã có: ${esc(eDup.name)}.</div>`:""}${ee&&eC&&!HO_RULE.test(eC)?`<div class="pill bad">Mã chưa đúng nguyên tắc.</div>`:""}
+  <div class="scroll" style="max-height:440px"><table class="t" id="hoTbl"><thead><tr><th>Mã HO</th><th>Tên item</th><th>ĐVT</th><th>Nguồn</th><th>Cập nhật</th><th></th></tr></thead><tbody>${lst.map(x=>ee&&ee.orig===x.code
+    ?`<tr data-hk="${esc(HOK(x.code+" "+x.name))}"><td><input data-hoe="code" value="${esc(ee.code)}" style="width:150px;text-transform:uppercase"></td><td><input data-hoe="name" value="${esc(ee.name)}" style="min-width:220px"></td><td><input data-hoe="dvt" value="${esc(ee.dvt)}" style="width:80px"></td><td class="k">${srcL[x.src]}</td><td></td><td style="white-space:nowrap"><button class="b sm p" data-a="hoEdSave" ${eOk?"":"disabled"}>Lưu</button> <button class="b sm" data-a="hoEdX">Hủy</button></td></tr>`
+    :`<tr data-hk="${esc(HOK(x.code+" "+x.name+" "+(x.alt||[]).join(" ")))}"><td><b>${esc(x.code)}</b></td><td>${esc(x.name)}</td><td>${esc(x.dvt)}</td><td class="k">${srcL[x.src]}</td><td class="k">${x.by?`${esc(x.by)} · ${esc(fdate(String(x.at||"").slice(0,10)))}`:""}</td><td style="white-space:nowrap"><button class="b sm" data-a="hoEd" data-k="${esc(x.code)}">✎ Sửa</button>${x.src==="tay"?` <button class="b sm d" data-a="hoDel" data-k="${esc(x.code)}">${S.arm==="ho"+x.code?"Bấm lần nữa":"Xóa"}</button>`:""}</td></tr>`).join("")}</tbody></table></div>
+  ${log.length?`<details style="margin-top:8px"><summary class="k" style="cursor:pointer">Lịch sử thêm/sửa gần đây (${log.length})</summary><table class="t"><tbody>${log.map(l=>`<tr><td class="k">${esc(fdate(String(l.at).slice(0,10)))}</td><td>${esc(l.by||"")}</td><td>${esc(l.txt||"")}</td></tr>`).join("")}</tbody></table></details>`:""}</div>`;}
+function hoFilter(){const q=HOK(S.hoEdit?.q||"");const tb=$("#hoTbl");if(!tb)return;let n=0;tb.querySelectorAll("tbody tr").forEach(tr=>{const sh=!q||tr.dataset.hk.includes(q)||tr.querySelector("[data-hoe]");tr.style.display=sh?"":"none";if(sh)n++;});const c=$("#hoCnt");if(c)c.textContent=q?`${n} mã khớp`:"";}
+/* Bộ lọc dòng trong biên bản F&B (không vẽ lại bảng, giữ vị trí cuộn) */
+function rowFilter(){const box=$("#modal");if(!box)return;const tb=box.querySelector("tbody[data-rf]");if(!tb)return;const q=HOK(S.fq||""),m=S.fs||"";let n=0,tot=0;
+  tb.querySelectorAll("tr[data-rk]").forEach(tr=>{tot++;const hs=tr.dataset.hs,ok=(!q||tr.dataset.rk.includes(q))&&(!m||(m==="need"?hs!=="ok":m==="dup"?tr.dataset.dn==="1":hs===m));tr.style.display=ok?"":"none";if(ok)n++;});
+  const c=$("#fCnt");if(c)c.textContent=q||m?`Đang hiện ${n}/${tot} dòng`:"";}
+/* Sửa / ghi đè 1 mã trong danh mục: đổi mã thì ghi bảng đổi mã để biên bản cũ tự theo mã mới */
+async function hoUpdate(x,nc,nm,dv,act){const by=S.user?.u||S.rap,at=nowIso();
+  if(x.src==="tay"){if(nc!==x.code)await hoSave("add/"+x.code,null);await hoSave("add/"+nc,{code:nc,name:nm,dvt:dv,alt:x.name!==nm?[x.name].concat(x.alt||[]):x.alt||[],by,rap:S.rap,at});}
+  else await hoSave("edit/"+x.mkey,{code:nc,name:nm,dvt:dv,by,rap:S.rap,at,prev:{code:x.code,name:x.name,dvt:x.dvt||""}});
+  if(nc!==x.code){const rn=(S.ho||{}).ren||{};for(const[k,v]of Object.entries(rn))if(v===x.code)await hoSave("ren/"+k,nc);await hoSave("ren/"+x.code,nc);if(rn[nc])await hoSave("ren/"+nc,null);}
+  await hoLog(`${act||"Sửa"} ${x.code} – ${x.name}${x.dvt?` (${x.dvt})`:""} → ${nc} – ${nm}${dv?` (${dv})`:""}`);
+  if(S.fedit)hoFix(S.fedit);return await hoRelinkAll();}
+async function hoLog(txt){await hoSave("log/"+Date.now(),{at:nowIso(),by:S.user?.u||S.rap,rap:S.rap,txt});}
+async function hoSave(path,val){if(!S.ho)S.ho={add:{},map:{}};const[a,b]=path.split("/");S.ho[a]=Object.assign({},S.ho[a]);if(val===null)delete S.ho[a][b];else S.ho[a][b]=val;_hoIx=null;
+  if(!DEMO){try{await firebase.database().ref("ctr/_shared/ho/"+path).set(val);}catch(e){toast("Chưa lưu được mã HO lên hệ thống: "+(e.message||e),"bad");throw e;}}}
 const Store={
   async start(){
-    if(DEMO){const d=isPilot()?readJson("seedDemo")||{}:{};S.settings=defSettings();KINDS.forEach(k=>S[k]=d[k]||[]);S.hist=[];return;}
+    if(DEMO){const d=isPilot()?readJson("seedDemo")||{}:{};S.settings=defSettings();KINDS.forEach(k=>S[k]=d[k]||[]);S.hist=[];S.ho={add:{},map:{},edit:{},ren:{},log:{}};S._loadedAll=true;hoAutoRelink();return;}
     await loadScript("https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js");
     await loadScript("https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js");
     await loadScript("https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js");
@@ -501,8 +534,8 @@ const Store={
     await firebase.auth().signInAnonymously();
     const root=firebase.database().ref("ctr/"+S.rap);S.fb=root;const list=(k,v)=>Object.entries(v||{}).map(([id,o])=>fbFix(k,Object.assign({id},o)));
     root.child("settings").on("value",s=>{S.settings=fbFix("settings",s.val()||defSettings());render();},onErr);
-    let loaded=0;KINDS.forEach(k=>root.child(k).on("value",s=>{S[k]=list(k,s.val());S.err[k]=[];if(++loaded===KINDS.length){S._loadedAll=true;seedOffer();}render();},onErr));
-    firebase.database().ref("ctr/_shared/ho").on("value",s=>{const v=s.val()||{};S.ho={add:v.add||{},map:v.map||{}};_hoIx=null;render();},onErr);
+    let loaded=0;KINDS.forEach(k=>root.child(k).on("value",s=>{S[k]=list(k,s.val());S.err[k]=[];if(++loaded===KINDS.length){S._loadedAll=true;seedOffer();}render();if(k==="forms")hoAutoRelink();},onErr));
+    firebase.database().ref("ctr/_shared/ho").on("value",s=>{const v=s.val()||{};S.ho={add:v.add||{},map:v.map||{},edit:v.edit||{},ren:v.ren||{},log:v.log||{}};_hoIx=null;render();hoAutoRelink();},onErr);
     root.child("hist").limitToLast(30).on("value",s=>{S.hist=list(s.val()).sort((a,b)=>(b.at||"").localeCompare(a.at||""));},onErr);
     firebase.database().ref(".info/connected").on("value",s=>{$("#stat").textContent=s.val()?"● Đã đồng bộ":"○ Mất kết nối, thay đổi sẽ gửi khi có mạng";});
   },
@@ -989,7 +1022,7 @@ function vBudget(){
   const nFlag=[...flags.values()].filter(f=>f.type==="vat");const vatSum=nFlag.reduce((s,f)=>s+f.file-f.pre,0);
   const sel=S.budgetSel;const det=sel?S.inv.filter(i=>i.status==="confirmed"&&i.ky===ym&&(i.items||[]).some(it=>it.hm===sel||String(it.hm).startsWith(sel+"."))):[];
   return `<div class="panel"><div class="row"><span class="ttl grow">Kinh phí rạp tháng ${m}/${y} · trước VAT</span>
-   <label class="chk"><input type="checkbox" id="hideZero" ${S.hideZero?"checked":""}> Ẩn hạng mục không phát sinh</label><button class="b ${S.showNotes?"p":""}" data-a="kpNotes" aria-pressed="${!!S.showNotes}">${S.showNotes?"Ẩn chú thích":"Hiện chú thích"}</button><button class="b" data-a="kpExport">📊 Xuất Excel để chỉnh sửa</button><button class="b g" data-a="kpImport">📎 Cập nhật file Kinh phí</button><input type="file" id="kpFile" accept=".xlsx,.xls,.xlsb" hidden></div>
+   <input type="file" id="kpFile" accept=".xlsx,.xls,.xlsb" hidden>${fnMenu("kp",[{h:"Hiển thị"},[`data-a="kpZero"`,`${S.hideZero?"☑":"☐"} Ẩn hạng mục không phát sinh`],[`data-a="kpNotes"`,`📝 ${S.showNotes?"Ẩn chú thích":"Hiện chú thích"}`],{h:"File Kinh phí"},[`data-a="kpExport"`,"📊 Xuất Excel để chỉnh sửa"],[`data-a="kpImport"`,"📎 Cập nhật file Kinh phí"]])}</div>
    <div class="chips"><div class="chip"><span class="k">Tổng tháng ${m}/${y}</span><b>${fmt(T.cur)}</b></div><div class="chip"><span class="k">Tháng trước</span><b>${fmt(T.lm)}</b><span>${ch(T.cur,T.lm)}</span></div>
     <div class="chip"><span class="k">Cùng kỳ ${+y-1}</span><b>${T.ly?fmt(T.ly):"—"}</b><span>${T.ly?ch(T.cur,T.ly):""}</span></div></div>
    ${(()=>{const nd=[...flags.entries()].filter(([,f])=>f.type==="nodoc");const df=[...flags.values()].filter(f=>f.type==="diff");const none=!S.inv.some(i=>i.status==="confirmed"&&i.ky===ym);const tot=fmt(nd.reduce((a,[,f])=>a+f.file,0));
@@ -1057,7 +1090,8 @@ function vErr(mods){const rows=errList(mods);
       <td class="n" style="white-space:nowrap"><button class="b sm" data-a="errBack" data-k="${k}" data-id="${o.id}">↩ Khôi phục</button> ${pw!==undefined?`<input type="password" inputmode="numeric" data-errpw="${esc(key)}" placeholder="Mật khẩu" value="${esc(pw)}" style="width:96px"> <button class="b sm d" data-a="errDel" data-k="${k}" data-id="${o.id}">Xóa hẳn</button> <button class="b sm" data-a="errPwX" data-k="${esc(key)}">Hủy</button>`:`<button class="b sm d" data-a="errPw" data-k="${esc(key)}">🗑 Xóa</button>`}</td></tr>`;}).join("")}</tbody></table></div>`:`<div class="empty">Chưa có bản scan nào trong bảng lỗi.</div>`}</div>`;}
 function errTabs(scope,n){const on=S.errView["_"+scope];return`<nav class="tabs small" style="margin-bottom:8px"><button data-a="errTab" data-k="${scope}" data-v="" aria-selected="${!on}">Lưu trữ</button><button data-a="errTab" data-k="${scope}" data-v="1" aria-selected="${!!on}">Bản scan lỗi (${n})</button></nav>`;}
 function render(){if($("#app").hidden)return;splitErr();if(!S._kyFixed&&S.rap&&(DEMO||S._loadedAll)&&S.inv.length){S._kyFixed=true;setTimeout(()=>kyFix().catch(()=>{}),0);}(S.kp||[]).forEach(d=>{if(KP[d.id]!==d){KP[d.id]=d;_mcache.clear();}});const v=$("#view");const y=window.scrollY;
-  setHTML(v,S.tab==="budget"?vBudget():S.tab==="dnc"?vDncTab():S.tab==="tt"?vTT():vModule(S.tab));renderModal();bind();window.scrollTo(0,y);}
+  const sig=S.tab+"|"+S.sub+"|"+JSON.stringify(S.msub)+"|"+!!S.hoEdit,sp=sig===S._vsig?[...v.querySelectorAll(".scroll")].map(e=>[e.scrollTop,e.scrollLeft]):[];S._vsig=sig;
+  setHTML(v,S.tab==="budget"?vBudget():S.tab==="dnc"?vDncTab():S.tab==="tt"?vTT():vModule(S.tab));renderModal();bind();window.scrollTo(0,y);v.querySelectorAll(".scroll").forEach((e,i)=>{if(sp[i]){e.scrollTop=sp[i][0];e.scrollLeft=sp[i][1];}});}
 function vDncTab(){
   const subs=[["list","Danh sách ĐNC"],["archive","Lưu trữ chứng từ"],["settings","Cài đặt"]];S.msub.dnc=S.sub;
   return moduleHead("dnc",subs)+(S.sub==="list"?vList():S.sub==="archive"?vArchive():S.setOk?vSettings():vSetLock());}
@@ -1387,9 +1421,10 @@ function formChecks(f){const c=[],add=(lv,t)=>c.push({lv,t});const st=S.settings
     if(prev)(f.rows||[]).forEach(r=>{const p=(prev.rows||[]).find(x=>x.loai===r.loai);if(p&&+p.sl!==+r.sl)add("inf",`${r.loai}: ${fmt(p.sl)} → ${fmt(r.sl)} (${+r.sl-+p.sl>0?"+":""}${fmt(+r.sl-+p.sl)}) so với lần kiểm ${fdate(prev.date)}.`);});}
   if(f.type==="dong_phuc")(f.rows||[]).forEach(r=>{const x=+r.xnt||0,t=+r.tt||0;if(x!==t&&Math.abs(t-x)>(x*0.05)&&!r.gt)add("bad",`${r.ten}: chênh ${t-x} (>5%) chưa có giải trình.`);});
   if(["fb_dem","fb_dc"].includes(f.type)){const rs=f.rows||[];const ms=rs.filter(r=>hoSt(r)==="miss"),ot=rs.filter(r=>hoSt(r)==="out");
-    if(ms.length)add("bad",`${ms.length} dòng chưa có mã HO: ${ms.slice(0,6).map(r=>r.ten).join(", ")}${ms.length>6?"…":""}. Chọn mã gợi ý hoặc thêm mã qua nút "Mã HO".`);
+    if(ms.length)add("bad",`${ms.length} dòng chưa có mã HO: ${ms.slice(0,6).map(r=>r.ten).join(", ")}${ms.length>6?"…":""}. Chọn mã gợi ý, hoặc thêm mã ở "🏷 Danh mục mã HO".`);
     if(ot.length)add("warn",`${ot.length} dòng có mã không nằm trong Master data HO: ${ot.slice(0,6).map(r=>`${r.ten} (${r.ma})`).join(", ")}${ot.length>6?"…":""}. Kiểm tra lại mã.`);
-    const dp=rs.filter(r=>r._dup).length;if(dp)add("inf",`${dp} dòng nhân đôi (nhiều date hàng / điều chỉnh).`);}
+    const dp=rs.filter(r=>r._dup).length,dn=rs.filter(r=>r._dupNeed&&(r._dupNeed.sl||r._dupNeed.hsd));if(dn.length)add("warn",`${dn.length} dòng nhân đôi chưa nhập lại SL thực tế/HSD (ô tô đỏ): ${dn.slice(0,5).map(r=>r.ten).join(", ")}${dn.length>5?"…":""}.`);else if(dp)add("inf",`${dp} dòng nhân đôi (nhiều date hàng / điều chỉnh).`);
+    if(f.h?.hoAfterSign)add("inf",`Mã HO được cập nhật theo danh mục sau khi ký (${fdate(f.h.hoAfterSign)}). Bản scan đã ký vẫn ghi mã cũ.`);}
   if(f.type==="fb_dem"&&f.h?.svId){const rs0=f.rows||[];const gv=new Map();rs0.forEach(r=>{if(!r._v||!r.vcode)return;const g=gv.get(r.vcode)||{r,sl:0,has:false};if(r.sl!==""&&r.sl!=null){g.sl+=+r.sl||0;g.has=true;}gv.set(r.vcode,g);});
     const rs=rs0.filter((r,i)=>!r._v||!r.vcode||rs0.findIndex(x=>x.vcode===r.vcode)===i);const nw=rs.filter(r=>r._new),vr=rs.filter(r=>r._v&&r._v.var),neg=rs.filter(r=>+r.sl<0),ed=[...gv.values()].filter(g=>g.has&&Math.abs(g.sl-g.r._v.close)>1e-4).map(g=>g.r),gone=f.h.gone||[];
     add("inf",`${rs.length} mặt hàng còn tồn trên báo cáo Vista, trong đó ${nw.length} mặt hàng mới so với biên bản kỳ trước.`);
@@ -1407,7 +1442,7 @@ function formChecks(f){const c=[],add=(lv,t)=>c.push({lv,t});const st=S.settings
   return c;}
 
 /* ---------- Thông tin rạp in trên biên bản (nhập 1 lần, lưu theo rạp) ---------- */
-const BB_F=[["congTy","Tên công ty"],["chiNhanh","Tên chi nhánh (dòng đầu biên bản đồng phục)"],["tenRap","Tên rạp đầy đủ"],["rap","Rạp / Kho"],["diaChi","Địa chỉ rạp"],["vanPhong","Dòng văn phòng (biên bản quỹ)"],["khuVuc","Khu vực"]];
+const BB_F=[["congTy","Tên công ty",""],["chiNhanh","Tên chi nhánh","In ở dòng đầu biên bản đồng phục"],["tenRap","Tên rạp đầy đủ",""],["rap","Rạp / Kho",""],["diaChi","Địa chỉ rạp",""],["khuVuc","Khu vực",""],["vanPhong","Dòng văn phòng","In trên biên bản quỹ","w"]];
 function bbi(){const st=S.settings||{};const b=st.bbInfo||{};const a=(CFG.accounts||[]).find(x=>x.rap===S.rap)||{};const pilot=isPilot();
   const rapN=(a.tenRap||a.ten||"").replace(/^Galaxy\s+/,"");
   const d=pilot?{congTy:"Công Ty Cổ Phần Phim Thiên Ngân",chiNhanh:"CÔNG TY CỔ PHẦN PHIM THIÊN NGÂN - CHI NHÁNH PHAN HUY ÍCH",tenRap:st.tenRap||"Galaxy Thiso Phan Huy Ích",rap:"Phan Huy Ích",diaChi:"385 Phan Huy Ích, phường An Hội Tây, TP.HCM, Việt Nam",vanPhong:st.vanPhong||"Văn phòng: Lầu 4 TTTM, Số 385 Phan Huy Ích, phường An Hội Tây",khuVuc:"TP. Hồ Chí Minh"}
@@ -1418,7 +1453,7 @@ const ifcEntName=()=>isPilot()?"Cinema - Thiso Phan Huy Ích":"Cinema - "+bbi().
 const UP=x=>String(x||"").toLocaleUpperCase("vi");
 function vBbEdit(){const e=S.bbEdit;if(!e)return"";return`<div class="panel"><div class="row"><span class="ttl grow">Thông tin rạp in trên biên bản</span><button class="b" data-a="bbClose">Đóng</button></div>
   <div class="k">Nhập 1 lần, áp dụng cho mọi biên bản kiểm kê và đề nghị trích trước của rạp này.</div>
-  <div class="grid">${BB_F.map(([k,l])=>`<label class="f">${esc(l)}<input data-bb="${k}" value="${esc(e[k]||"")}"></label>`).join("")}</div>
+  <div class="bbg">${BB_F.map(([k,l,h,w])=>`<label class="f${w?" wide":""}">${esc(l)}<input data-bb="${k}" value="${esc(e[k]||"")}">${h?`<span class="hint">${esc(h)}</span>`:""}</label>`).join("")}</div>
   <div class="row" style="margin-top:8px"><button class="b p" data-a="bbSave">Lưu</button></div></div>`;}
 /* ---------- Mẫu in ---------- */
 function prHead(code){const st=S.settings||{};const B=bbi();return`<table class="fx"><tr><td style="width:62%"></td><td class="fbox">Mã số:&nbsp;&nbsp; ${esc(code)}</td></tr></table>
@@ -1480,13 +1515,14 @@ function formHtml(f){const st=S.settings||{};const B=bbi();const T=FT[f.type];co
   return"";}
 
 /* ---------- Danh sách theo module ---------- */
+/* Nút "☰ Chức năng": gom các nút thao tác của từng tab vào 1 menu xổ xuống */
+function fnMenu(id,items){items=items.filter(Boolean);if(!items.length)return"";const op=S.dd===id;
+  return`<div class="dd"><button class="b p" data-a="ddT" data-k="${id}" aria-haspopup="true" aria-expanded="${op}">☰ Chức năng ▾</button>${op?`<div class="ddm" role="menu">${items.map(x=>x.h?`<div class="ddh">${x.h}</div>`:`<button class="ddi" role="menuitem" ${x[0]}>${x[1]}</button>`).join("")}</div>`:""}</div>`;}
 function moduleHead(mod,subs){const s=S.msub[mod]||subs[0][0];
-  const svBtn=`<button class="b" data-a="svUp">📄 Tải báo cáo Vista F&amp;B</button><input type="file" id="svFile" accept="application/pdf" hidden>`;
-  const btn=mod==="dnc"?(s==="archive"?`<button class="b p" data-a="openUp">📎 Tải bản scan</button>`:`<button class="b p" data-a="openUp">📥 Tải hóa đơn${S.inv.filter(i=>i.status==="draft").length?` <span class="cnt">${S.inv.filter(i=>i.status==="draft").length}</span>`:""}</button>`)
-    :s==="scan"?`<button class="b p" data-a="openScan" data-k="${mod}">📎 Tải bản scan</button>`
-    :s==="quy"?"":s==="plan"?`<span class="row">${svBtn}<button class="b g" data-a="planEdit">⚙ Sửa kế hoạch</button></span>`
-    :mod==="kk"?`<span class="row"><button class="b" data-a="bbEdit">🏢 Thông tin rạp</button><button class="b" data-a="hoOpen">🏷 Mã HO</button>${svBtn}<select id="newKk" aria-label="Lập biên bản"><option value="">＋ Lập biên bản…</option>${["Quỹ","Tài sản","F&B"].map(g=>`<optgroup label="${g}">${Object.entries(FT).filter(([k,v])=>v.grp===g).map(([k,v])=>`<option value="${k}">${esc(v.name)}</option>`).join("")}</optgroup>`).join("")}</select></span>`
-    :`<span class="row">${Object.entries(FT).filter(([k,v])=>v.mod===mod).map(([k,v],i)=>`<button class="b ${i===0?"p":""}" data-a="newForm" data-k="${k}">＋ ${esc(v.name)}</button>`).join("")}</span>`;
+  const nd=S.inv.filter(i=>i.status==="draft").length;
+  const btn=mod==="dnc"?fnMenu("dnc",[[`data-a="openUp" data-go="list" data-gm="dnc"`,`📥 Tải hóa đơn${nd?` <span class="cnt">${nd}</span>`:""}`],[`data-a="openUp" data-go="archive" data-gm="dnc"`,"📎 Tải bản scan lưu trữ"]])
+    :mod==="kk"?`<input type="file" id="svFile" accept="application/pdf" hidden>`+fnMenu("kk",[{h:"Tải lên"},[`data-a="svUp"`,"📄 Tải báo cáo F&amp;B"],[`data-a="openScan" data-k="kk" data-go="scan" data-gm="kk"`,"📎 Tải bản scan"],{h:"Cài đặt"},[`data-a="planEdit" data-go="plan" data-gm="kk"`,"⚙ Cài đặt kế hoạch"],[`data-a="bbEdit"`,"🏢 Thông tin rạp"],[`data-a="hoOpen"`,"🏷 Danh mục mã HO"]])
+    :fnMenu(mod,Object.entries(FT).filter(([k,v])=>v.mod===mod).map(([k,v])=>[`data-a="newForm" data-k="${k}"`,`＋ ${esc(v.name)}`]).concat(s==="scan"||true?[[`data-a="openScan" data-k="${mod}" data-go="scan" data-gm="${mod}"`,"📎 Tải bản scan"]]:[]));
   return`<div class="panel"><div class="row"><nav class="tabs small grow" role="tablist">${subs.map(([k,l])=>`<button role="tab" data-a="msub" data-m="${mod}" data-k="${k}" aria-selected="${s===k}">${l}</button>`).join("")}</nav>${btn}</div></div>`;}
 function vModule(mod){const subs=mod==="kk"?[["plan","Kế hoạch & checklist"],["list","Danh sách biên bản"],["quy","Sổ quỹ"],["scan","Lưu trữ bản scan"]]:[["list","Danh sách biên bản"],["scan","Lưu trữ bản scan"]];const s=S.msub[mod]||subs[0][0];
   return moduleHead(mod,subs)+(mod!=="dnc"?vBbEdit()+(mod==="kk"&&!S.fedit?vHo():""):"")+(s==="quy"?vCash():s==="plan"?vKkPlan():s==="list"?vFormList(mod):vScanList(mod));}
@@ -1519,7 +1555,7 @@ function pagesViewer(pages,pi){return pages.length?`<div class="viewer"><div cla
 
 /* ---------- Lập / sửa biên bản ---------- */
 function blankForm(type){const st=S.settings||{};const T=FT[type];const prev=S.forms.filter(f=>f.type===type).sort((a,b)=>b.date.localeCompare(a.date))[0];
-  const f={id:"f_"+uid(),mod:T.mod,type,date:today(),month:curYM(),status:"draft",src:"Lập trên app",h:prev?clone(prev.h):{},rows:[]};
+  const f={id:"f_"+uid(),mod:T.mod,type,date:today(),month:curYM(),status:"draft",src:"Lập trên app",h:prev?clone(prev.h):{},rows:[]};delete f.h.hoAfterSign;
   {const dn=st.kkNames||{};["qlts","giamsat"].forEach(k=>{if(dn[k])f.h[k]=dn[k];});}
   if(["quy_rap","quy_fb","float","du_thieu"].includes(type)){f.rows=DENOMS.map(d=>({denom:d,sl:0,gc:""}));f.h.note="";}
   if(type==="voucher"){f.rows=prev?prev.rows.map(r=>({loai:r.loai,sl:r.sl,series:r.series})):[];f.h.tonden=today();}
@@ -1552,10 +1588,10 @@ function formEditor(){const f=S.fedit;if(!f)return"";const T=FT[f.type];const in
   if(f.type==="dong_phuc"){head+=`<label class="f">TG bắt đầu${inp("h.tgbd",hm5(h.tgbd),'type="time"')}</label><label class="f">TG kết thúc${inp("h.tgkt",hm5(h.tgkt),'type="time"')}</label><label class="f">CM${inp("h.cm",h.cm)}</label><label class="f">COS${inp("h.cos",h.cos)}</label>`;
     body=rowsTable(f,[["ma","Mã"],["ten","Mặt hàng"],["dvt","ĐVT"],["xnt","SL báo cáo XNT","n"],["tt","SL thực tế","n"],["gt","Giải trình"]]);}
   if(f.type==="fb_dem"){head+=`<label class="f">TG bắt đầu${inp("h.tgbd",h.tgbd)}</label><label class="f">TG kết thúc${inp("h.tgkt",h.tgkt)}</label>${nameF("qlts","Quản lý tài sản")}<label class="f">Kế toán${inp("h.ketoan",h.ketoan)}</label>${nameF("giamsat","Giám sát")}`;
-    body=`<label class="f">Ý kiến của Giám sát<textarea data-f="h.ykien" rows="2">${esc(h.ykien||"")}</textarea></label>`+`<div class="row"><button class="b g" data-a="hoOpen">🏷 Mã HO · nguyên tắc thêm mã</button><span class="k">⧉ ở cuối mỗi dòng: nhân đôi dòng cho item nhiều date hàng hoặc cần điều chỉnh, rồi sửa tay.</span></div>`+rowsTable(f,[["ma","Mã hàng","hocode"],["ten","Tên hàng"],["dvt","ĐVT"]].concat(h.svId?[["vsys","Vista: tồn cuối · lệch KK","ro",r=>r._v?`${fmtQ(r._v.close)}${r._v.var?` · <b>${r._v.var>0?"+":""}${fmtQ(r._v.var)}</b>`:""}`:r._new?"":"không có trên báo cáo"]]:[]).concat([["sl","SL thực tế","n"],["hh","Hư hỏng"],["gcl","Giảm CL"],["hsd","HSD","date"],["gc","Ghi chú"]]));}
+    body=`<label class="f">Ý kiến của Giám sát<textarea data-f="h.ykien" rows="2">${esc(h.ykien||"")}</textarea></label>`+`<div class="row"><button class="b g" data-a="hoOpen">🏷 Danh mục mã HO</button><span class="k">⧉ cuối mỗi dòng: nhân đôi dòng cho item nhiều date hàng hoặc cần điều chỉnh. Dòng mới giữ nguyên nội dung, ô SL thực tế và HSD tô đỏ đến khi nhập lại.</span></div>`+rowsTable(f,[["ma","Mã hàng","hocode"],["ten","Tên hàng"],["dvt","ĐVT"]].concat(h.svId?[["vsys","Vista: tồn cuối · lệch KK","ro",r=>r._v?`${fmtQ(r._v.close)}${r._v.var?` · <b>${r._v.var>0?"+":""}${fmtQ(r._v.var)}</b>`:""}`:r._new?"":"không có trên báo cáo"]]:[]).concat([["sl","SL thực tế","n"],["hh","Hư hỏng"],["gcl","Giảm CL"],["hsd","HSD","date"],["gc","Ghi chú"]]));}
   if(f.type==="fb_dc"){head+=`<label class="f">TG bắt đầu${inp("h.tgbd",h.tgbd)}</label><label class="f">TG kết thúc${inp("h.tgkt",h.tgkt)}</label>${nameF("qlts","Quản lý tài sản")}${nameF("giamsat","Giám sát")}`;
     {const o=kyOf(f.date);const sv=o&&kySv(o.ym,o.k);body=sv?`<div class="row"><button class="b g" data-a="dcSv" data-k="${sv.id}">↻ Gợi ý từ báo cáo Vista kỳ ${fdate(sv.date)}</button></div>`:"";}
-    body+=`<div class="row"><button class="b g" data-a="hoOpen">🏷 Mã HO · nguyên tắc thêm mã</button></div>`+rowsTable(f,[["ma","Mã hàng","hocode"],["ten","Tên hàng"],["dvt","ĐVT"],["loai","Tăng/Giảm","sel:Tăng,Giảm"],["sl","Số lượng","n"],["ngay","Ngày phát sinh","date"],["lydo","Lý do","sel:Nhập hàng chuyển rạp,Hủy cuối ngày,Hết hạn sử dụng,Hư hỏng do vận hành,Hư hỏng do nhà cung cấp,Khác"]]);}
+    body+=`<div class="row"><button class="b g" data-a="hoOpen">🏷 Danh mục mã HO</button></div>`+rowsTable(f,[["ma","Mã hàng","hocode"],["ten","Tên hàng"],["dvt","ĐVT"],["loai","Tăng/Giảm","sel:Tăng,Giảm"],["sl","Số lượng","n"],["ngay","Ngày phát sinh","date"],["lydo","Lý do","sel:Nhập hàng chuyển rạp,Hủy cuối ngày,Hết hạn sử dụng,Hư hỏng do vận hành,Hư hỏng do nhà cung cấp,Khác"]]);}
   if(f.type==="tich_truoc"){head+=`<label class="f">Bộ phận${inp("h.boPhan",h.boPhan)}</label><label class="f">Dự án${inp("h.duAn",h.duAn)}</label><label class="f">Người đề nghị${inp("h.nguoiDN",h.nguoiDN)}</label><label class="f">Người duyệt${inp("h.nguoiDuyet",h.nguoiDuyet)}</label>`;
     body=`<div class="row"><button class="b g" data-a="ttSuggest">↻ Gợi ý lại từ hóa đơn tháng trước</button></div>`+rowsTable(f,[["vendor","Mã NCC","vendor"],["vname","Tên NCC"],["ifc","IFC"],["pre","Chưa VAT","n"],["vat","VAT","n"],["ref","Số HĐ"],["desc","Diễn giải","ta"],["pic","Người phụ trách"]]);}
   head+="</div>";const cs=formChecks(f);
@@ -1565,15 +1601,15 @@ function formEditor(){const f=S.fedit;if(!f)return"";const T=FT[f.type];const in
 /* nhập ngày bằng tay: 31/12/2026, 31-12-26, 311226, 31122026 → 2026-12-31; sai thì giữ nguyên để báo */
 function dmyIn(x){x=String(x||"").trim();if(!x)return"";let m=x.match(/^(\d{1,2})\D+(\d{1,2})\D+(\d{2}|\d{4})$/)||x.match(/^(\d{2})(\d{2})(\d{2}|\d{4})$/);
   if(!m)return x;let [_,d,mo,y]=m;if(y.length===2)y="20"+y;d=+d;mo=+mo;if(mo<1||mo>12||d<1||d>31)return x;return`${y}-${pad2(mo)}-${pad2(d)}`;}
-function rowsTable(f,cols){return`<div class="scroll tall"><table class="t"><thead><tr><th>#</th>${cols.map(c=>`<th>${esc(c[1])}</th>`).join("")}<th></th></tr></thead><tbody>${f.rows.map((r,i)=>`<tr><td>${i+1}</td>${cols.map(c=>{const k=`rows.${i}.${c[0]}`,v=r[c[0]]??"",t=c[2]||"";
+function rowsTable(f,cols){const FBT=["fb_dem","fb_dc"].includes(f.type);return`${FBT?`<div class="row" style="margin:6px 0"><input data-fq value="${esc(S.fq||"")}" placeholder="🔎 Lọc sản phẩm: gõ mã hoặc tên hàng" style="flex:1;min-width:220px"><select data-fs aria-label="Lọc theo mã HO"><option value="">Tất cả dòng</option>${[["need","Mã HO cần sửa (chưa có + sai)"],["miss","Chưa có mã HO"],["out","Mã không có trong Master"]].concat(f.type==="fb_dem"?[["dup","Dòng nhân đôi chưa nhập lại SL/HSD"]]:[]).map(([k,l])=>`<option value="${k}" ${S.fs===k?"selected":""}>${l}</option>`).join("")}</select><span class="k" id="fCnt"></span></div>`:""}<div class="scroll tall"><table class="t"><thead><tr><th>#</th>${cols.map(c=>`<th>${esc(c[1])}</th>`).join("")}<th></th></tr></thead><tbody${FBT?" data-rf":""}>${f.rows.map((r,i)=>`<tr${FBT?` data-rk="${esc(HOK((r.ma||"")+" "+(r.ten||"")))}" data-hs="${hoSt(r)}" data-dn="${r._dupNeed&&(r._dupNeed.sl||r._dupNeed.hsd)?1:""}"`:""}><td>${i+1}</td>${cols.map(c=>{const k=`rows.${i}.${c[0]}`,v=r[c[0]]??"",t=c[2]||"",rd=r._dupNeed&&r._dupNeed[c[0]]?"border-color:#d33;background:#fff1f1;":"";
    if(t==="ro")return`<td class="n k" style="white-space:nowrap">${c[3]?c[3](r):esc(v)}</td>`;
    if(t==="ta")return`<td><textarea data-f="${k}" rows="2" style="min-width:180px">${esc(v)}</textarea></td>`;
    if(t.startsWith("sel:"))return`<td><select data-f="${k}"><option></option>${t.slice(4).split(",").map(o=>`<option ${o===v?"selected":""}>${esc(o)}</option>`).join("")}</select></td>`;
-   if(t==="date")return`<td><input data-f="${k}" data-dt="1" inputmode="numeric" placeholder="dd/mm/yyyy" style="width:118px" value="${esc(/^\d{4}-\d{2}-\d{2}$/.test(v)?v.slice(8)+"/"+v.slice(5,7)+"/"+v.slice(0,4):v)}"></td>`;
+   if(t==="date")return`<td><input data-f="${k}" data-dt="1" inputmode="numeric" placeholder="dd/mm/yyyy" style="width:118px;${rd}" value="${esc(/^\d{4}-\d{2}-\d{2}$/.test(v)?v.slice(8)+"/"+v.slice(5,7)+"/"+v.slice(0,4):v)}"></td>`;
    if(t==="fbcode")return`<td><input data-f="${k}" list="fbcodes" value="${esc(v)}" style="width:150px"></td>`;
    if(t==="hocode"){const s=hoSt(r),sg=s==="ok"?[]:hoSug(r.ten);return`<td style="min-width:160px"><input data-f="${k}" list="hocodes" value="${esc(v)}" style="width:150px;${s==="miss"?"border-color:#d33;background:#fff1f1":s==="out"?"border-color:#d98b00":""}">${s==="miss"?`<div class="k" style="color:#c22">Chưa có mã HO</div>`:s==="out"?`<div class="k" style="color:#a66a00">Không có trong Master</div>`:""}${sg.length?`<div class="row" style="gap:4px;margin-top:2px">${sg.map(x=>`<button class="b sm" data-a="hoPick" data-k="${i}" data-c="${esc(x.code)}" title="${esc(x.name)}">${esc(x.code)}</button>`).join("")}</div>`:""}</td>`;}
    if(t==="vendor")return`<td><input data-f="${k}" value="${esc(v)}" style="width:110px"></td>`;
-   return`<td><input data-f="${k}" ${t==="n"?'data-n="1" style="width:100px;text-align:right"':'style="min-width:90px"'} value="${esc(t==="n"&&v!==""&&v!==null?String(v):v)}"></td>`;}).join("")}<td style="white-space:nowrap">${f.type==="fb_dem"?`<button class="b sm" data-a="dupRow" data-k="${i}" title="Nhân đôi dòng (nhiều date hàng / điều chỉnh)">⧉</button> `:""}<button class="b sm" data-a="rmRow" data-k="${i}">✕</button></td></tr>`).join("")}
+   return`<td><input data-f="${k}" ${t==="n"?`data-n="1" style="width:100px;text-align:right;${rd}"`:`style="min-width:90px;${rd}"`} value="${esc(t==="n"&&v!==""&&v!==null?String(v):v)}"></td>`;}).join("")}<td style="white-space:nowrap">${f.type==="fb_dem"?`<button class="b sm" data-a="dupRow" data-k="${i}" title="Nhân đôi dòng (nhiều date hàng / điều chỉnh)">⧉</button> `:""}<button class="b sm" data-a="rmRow" data-k="${i}">✕</button></td></tr>`).join("")}
    <tr><td colspan="${cols.length+2}"><button class="b sm" data-a="addRow">+ Thêm dòng</button></td></tr></tbody></table></div>
    <datalist id="fbcodes">${FB_ITEMS.map(x=>`<option value="${esc(x[0])}">${esc(x[1])}</option>`).join("")}</datalist>${["fb_dem","fb_dc"].includes(f.type)?`<datalist id="hocodes">${hoIx().list.map(x=>`<option value="${esc(x.code)}">${esc(x.name)}</option>`).join("")}</datalist>`:""}`;}
 async function saveForm(){const f=S.fedit;if(!f)return;f.month=f.date.slice(0,7);
@@ -1690,7 +1726,7 @@ function ttInv(r,ym){const b=ttBrand(r.vname),c=ttCat(r.desc);const inv=S.inv.fi
   let best=null;inv.forEach(i=>{const s=(i.items||[]).filter(x=>ttCat(x.desc||i.cat)===c).reduce((a,x)=>a+x.amount,0);if(s&&(!best||Math.abs(s-P)<Math.abs(best.amt-P)))best={i,amt:s,how:"các dòng "+c};});
   if(best)return best;const i=inv.find(i=>ttCat(i.cat)===c);return i?{i,amt:i.subtotal,how:"hóa đơn "+i.cat}:null;}
 function vTT(){const subs=[["month","Theo tháng"],["year","Checklist năm"]];const s=S.msub.tt||"month";const m=curYM();const f=ttOf(m);S._ttN=0;const body=s==="month"?vTTMonth(m):vTTYear(m.slice(0,4));
-  const btn=`<span class="row">${s==="month"&&f?`<button class="b ${S.ttNotes?"p":""}" data-a="ttNotes" aria-pressed="${!!S.ttNotes}">📝 Ghi chú đối chiếu${S._ttN?` <span class="cnt">${S._ttN}</span>`:""}</button>`:""}${s==="month"&&!f?`<button class="b p" data-a="ttNew">＋ Tạo mới</button>`:""}${s==="month"&&f?`<button class="b g" data-a="editForm" data-id="${f.id}">✎ Sửa</button><button class="b p" data-a="xlsTT" data-id="${f.id}">📊 Xuất Excel</button><button class="b" data-a="printForm" data-id="${f.id}">🖨 Xuất PDF</button>`:""}</span>`;
+  const btn=fnMenu("tt",[!f?[`data-a="ttNew" data-go="month" data-gm="tt"`,`＋ Tạo mới tháng ${ymLbl(m)}`]:null,f?[`data-a="editForm" data-id="${f.id}"`,"✎ Sửa đề nghị trích trước"]:null,f?[`data-a="xlsTT" data-id="${f.id}"`,"📊 Xuất Excel (đúng file mẫu)"]:null,f?[`data-a="printForm" data-id="${f.id}"`,"🖨 Xuất PDF"]:null,f&&s==="month"?[`data-a="ttNotes"`,`📝 ${S.ttNotes?"Ẩn":"Hiện"} ghi chú đối chiếu${S._ttN?` <span class="cnt">${S._ttN}</span>`:""}`]:null]);
   return`<div class="panel"><div class="row"><nav class="tabs small grow" role="tablist">${subs.map(([k,l])=>`<button role="tab" data-a="msub" data-m="tt" data-k="${k}" aria-selected="${s===k}">${l}</button>`).join("")}</nav>${btn}</div></div>`+body;}
 function vTTMonth(m){const f=ttOf(m),p=ttPrev(m);const cur=ttSum(f),prv=ttSum(p);const pl=p?`T${+p.month.slice(5)}/${p.month.slice(0,4)}`:"";
   const ch=(c,o)=>!o?`<span class="pill neu">Mới</span>`:(()=>{const d=(c-o)/o;return Math.abs(d)<0.005?`<span class="pill ok">0%</span>`:`<span class="pill ${d>0.1?"bad":d<-0.1?"ok":"neu"}">${d>0?"+":""}${(d*100).toFixed(1)}%</span>`})();
@@ -1969,7 +2005,7 @@ function hbars(){document.querySelectorAll(".hbar").forEach(x=>x.remove());docum
   const bar=document.createElement("div");bar.className="hbar";bar.innerHTML=`<div style="width:${el.scrollWidth}px;height:1px"></div>`;el.after(bar);bar.scrollLeft=el.scrollLeft;
   let lock=false;bar.onscroll=()=>{if(lock){lock=false;return;}lock=true;el.scrollLeft=bar.scrollLeft;};el.addEventListener("scroll",()=>{if(lock){lock=false;return;}lock=true;bar.scrollLeft=el.scrollLeft;});});}
 window.addEventListener("resize",()=>hbars());
-function bind(){setTimeout(hbars,0);setTimeout(hydrateImgs,0);
+function bind(){setTimeout(hbars,0);setTimeout(hydrateImgs,0);rowFilter();hoFilter();
   const drop=$("#drop"),fi=$("#file");
   if(drop){drop.onclick=()=>fi.click();drop.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();fi.click();}};
     drop.ondragover=e=>{e.preventDefault();drop.classList.add("on")};drop.ondragleave=()=>drop.classList.remove("on");
@@ -1985,13 +2021,17 @@ function bind(){setTimeout(hbars,0);setTimeout(hydrateImgs,0);
   [["#ttFile",ttImport],["#cashFile",cashImport],["#dmFile",dmImport]].forEach(([sel,fn])=>{const el=$(sel);if(el)el.onchange=()=>{if(el.files[0])fn(el.files[0]);el.value="";};});
   const kf=$("#kpFile");if(kf)kf.onchange=()=>{if(kf.files[0])importKP(kf.files[0]);kf.value="";};
 }
+document.addEventListener("input",e=>{if(e.target.matches("[data-fq]")){S.fq=e.target.value;rowFilter();}else if(e.target.matches("[data-hoq]")&&S.hoEdit){S.hoEdit.q=e.target.value;hoFilter();}});
 document.addEventListener("change",e=>{const pe=e.target.closest("[data-pe]");if(pe&&S.planEdit){const k=pe.dataset.pe.split(".");if(k.length===1)S.planEdit[k[0]]=pe.value;else{S.planEdit[k[0]]=Object.assign({},S.planEdit[k[0]]);S.planEdit[k[0]][k[1]]=pe.type==="checkbox"?(pe.checked?1:0):pe.value;}return;}
   const ff=e.target.closest("[data-f]");if(ff&&S.fedit){let v=ff.value;if(ff.dataset.n)v=v===""?"":num(v);if(ff.dataset.dt)v=dmyIn(v);setPath(S.fedit,ff.dataset.f,v);
+    {const mm=/^rows\.(\d+)\.(sl|hsd)$/.exec(ff.dataset.f);if(mm){const r=S.fedit.rows[+mm[1]];if(r&&r._dupNeed){delete r._dupNeed[mm[2]];if(!r._dupNeed.sl&&!r._dupNeed.hsd)delete r._dupNeed;}}}
     if(["fb_dem","fb_dc"].includes(S.fedit.type)&&/rows\.\d+\.ma$/.test(ff.dataset.f)){const r=S.fedit.rows[+ff.dataset.f.split(".")[1]];r.ma=String(v||"").trim().toUpperCase();r._hoTay=1;const it=hoGet(r.ma);if(it&&(S.fedit.type==="fb_dc"||!r.ten)){r.ten=it.name;r.dvt=r.dvt||it.dvt;}}
     if(S.fedit.type==="tich_truoc"&&/rows\.\d+\.vendor$/.test(ff.dataset.f)){const i=+ff.dataset.f.split(".")[1];const vv=S.byNo.get(String(v).trim());if(vv)S.fedit.rows[i].vname=vv[1];}
     if(S.fedit.type==="tich_truoc"&&/rows\.\d+\.pre$/.test(ff.dataset.f)){const r=S.fedit.rows[+ff.dataset.f.split(".")[1]];if(r.vr&&(r.vat===""||r.vat==null||r._va)&&v!==""){r.vat=Math.round(v*r.vr);r._va=1;}}
     if(S.fedit.type==="tich_truoc"&&/rows\.\d+\.vat$/.test(ff.dataset.f)){delete S.fedit.rows[+ff.dataset.f.split(".")[1]]._va;}
     const md=$("#modal"),y=md.scrollTop;const sp=[...md.querySelectorAll(".scroll")].map(e=>[e.scrollTop,e.scrollLeft]);renderModal();bind();md.scrollTop=y;md.querySelectorAll(".scroll").forEach((e,i)=>{if(sp[i]){e.scrollTop=sp[i][0];e.scrollLeft=sp[i][1];}});return;}
+  if(e.target.matches("[data-fs]")){S.fs=e.target.value;rowFilter();return;}
+  const hoe=e.target.closest("[data-hoe]");if(hoe&&S.hoEdit?.ed){S.hoEdit.ed[hoe.dataset.hoe]=hoe.dataset.hoe==="code"?hoe.value.trim().toUpperCase():hoe.value;S.fedit?reModal():render();return;}
   const ho=e.target.closest("[data-ho]");if(ho&&S.hoEdit){S.hoEdit[ho.dataset.ho]=ho.dataset.ho==="code"?ho.value.trim().toUpperCase():ho.value;S.fedit?reModal():render();return;}
   const rr=e.target.closest("[data-r]");if(rr&&S.scanEdit?.rev){const r=S.scanEdit.rev[+rr.dataset.r];if(r){const k=rr.dataset.rf;r[k]=rr.type==="checkbox"?rr.checked:rr.value;if(k==="type"&&!rr.value)r.ok2=false;renderModal();bind();}return;}
   const de=e.target.closest("[data-de]");if(de&&S.dncEdit){let v=de.value;if(de.dataset.n)v=num(v)||0;setPath(S.dncEdit,de.dataset.de,v);
@@ -2003,7 +2043,11 @@ document.addEventListener("change",e=>{const pe=e.target.closest("[data-pe]");if
   if(k==="date"){d.month=ymOf(v);if(!d.ky)d.ky=ymOf(v);}
   if(k==="seller.mst"){const o=S.byMst.get(v)||[];d.vendorNo=o[0]?o[0][0]:"";d.seller.name=o[0]?o[0][1]:d.seller.name;const bk=banks().find(b=>b.mst&&mstN(b.mst)===v);if(bk)d.payeeKey=bk.key;}
   const md=$("#modal"),y=md.scrollTop;renderModal();bind();md.scrollTop=y;});
-document.addEventListener("click",async e=>{const b=e.target.closest("[data-a]");if(!b)return;const a=b.dataset.a,id=b.dataset.id;
+document.addEventListener("click",async e=>{const b0=e.target.closest("[data-a]");if(S.dd&&!(b0&&b0.dataset.a==="ddT")){const inM=e.target.closest(".ddm");S.dd=null;if(b0&&inM&&b0.dataset.go){if(b0.dataset.gm==="dnc")S.sub=b0.dataset.go;else S.msub[b0.dataset.gm]=b0.dataset.go;}if(!b0){render();return;}if(inM)render();}
+  const b=b0;if(!b)return;const a=b.dataset.a,id=b.dataset.id;
+  if(a==="ddT"){S.dd=S.dd===b.dataset.k?null:b.dataset.k;render();return;}
+  if(a==="kpZero"){S.hideZero=!S.hideZero;render();return;}
+  if(a==="kkNewF"){S.fedit=blankForm(b.dataset.k);render();return;}
   if(a==="sub"){S.sub=b.dataset.k;render();}
   else if(a==="msub"){if(b.dataset.m==="dnc")S.sub=b.dataset.k;else S.msub[b.dataset.m]=b.dataset.k;S.arcPage=0;render();}
   else if(a==="newForm"){S.fedit=blankForm(b.dataset.k);render();}
@@ -2033,13 +2077,21 @@ document.addEventListener("click",async e=>{const b=e.target.closest("[data-a]")
   else if(a==="editForm"){S.fedit=clone(S.forms.find(x=>x.id===id));const n=hoFix(S.fedit);render();if(n)toast(`Đã cập nhật ${n} mã hàng theo Master data HO. Kiểm tra rồi bấm Lưu.`,"inf");}
   else if(a==="hoOpen"){S.hoEdit={};S.fedit?reModal():render();}
   else if(a==="hoClose"){S.hoEdit=null;S.fedit?reModal():render();}
-  else if(a==="hoAdd"){const e=S.hoEdit||{};const c=String(e.code||"").trim().toUpperCase(),nm=String(e.name||"").trim();if(!HO_RULE.test(c)||hoGet(c)||!nm)return;
-    await hoSave("add/"+c,{code:c,name:nm,dvt:String(e.dvt||"").trim(),by:S.user?.u||S.rap,rap:S.rap,at:nowIso()});await Store.addHist({at:nowIso(),summary:`Thêm mã HO ${c} – ${nm}`});
-    if(S.fedit)hoFix(S.fedit);S.hoEdit={q:c};toast(`Đã thêm mã ${c}.`);S.fedit?reModal():render();}
-  else if(a==="hoDel"){const k=b.dataset.k;if(S.arm!=="ho"+k){S.arm="ho"+k;S.fedit?reModal():render();return;}S.arm=null;await hoSave("add/"+k,null);await Store.addHist({at:nowIso(),summary:`Xóa mã HO thêm tay ${k}`});S.fedit?reModal():render();}
+  else if(a==="hoMode"){S.hoEdit.mode=b.dataset.k;S.hoEdit.ed=null;S.fedit?reModal():render();}
+  else if(a==="hoAdd"){const e=S.hoEdit||{};const c=String(e.code||"").trim().toUpperCase(),nm=String(e.name||"").trim();if(!HO_RULE.test(c)||hoIx().code.get(c)||!nm)return;
+    await hoSave("add/"+c,{code:c,name:nm,dvt:String(e.dvt||"").trim(),by:S.user?.u||S.rap,rap:S.rap,at:nowIso()});await hoLog(`Thêm mã ${c} – ${nm}`);
+    if(S.fedit)hoFix(S.fedit);const n=await hoRelinkAll();S.hoEdit={q:c};toast(`Đã thêm mã ${c}.${n?` Cập nhật ${n} biên bản.`:""}`);S.fedit?reModal():render();}
+  else if(a==="hoAddFrom"){Object.assign(S.hoEdit,{mode:"add",ed:null,code:b.dataset.k,name:b.dataset.n,dvt:b.dataset.u,useOpen:1});S.fedit?reModal():render();}
+  else if(a==="hoEd"){const x=hoIx().code.get(b.dataset.k);if(!x)return;S.hoEdit.mode="";S.hoEdit.ed={orig:x.code,code:x.code,name:x.name,dvt:x.dvt||""};S.fedit?reModal():render();}
+  else if(a==="hoEdX"){S.hoEdit.ed=null;S.fedit?reModal():render();}
+  else if(a==="hoEdSave"){const ee=S.hoEdit.ed,X=hoIx(),x=X.code.get(ee.orig);if(!x)return;const nc=String(ee.code||"").trim().toUpperCase(),nm=String(ee.name||"").trim(),dv=String(ee.dvt||"").trim();
+    if(!HO_RULE.test(nc)||!nm||(nc!==x.code&&X.code.get(nc)))return;const n=await hoUpdate(x,nc,nm,dv);S.hoEdit.ed=null;toast(`Đã lưu mã ${nc}.${n?` Cập nhật ${n} biên bản.`:""}`);S.fedit?reModal():render();}
+  else if(a==="hoOver"){const e=S.hoEdit,X=hoIx(),x=X.code.get(b.dataset.k);if(!x)return;const nc=String(e.code||"").trim().toUpperCase(),nm=String(e.name||"").trim()||x.name,dv=String(e.dvt||"").trim()||x.dvt||"";
+    if(!HO_RULE.test(nc)||(nc!==x.code&&X.code.get(nc)))return;const n=await hoUpdate(x,nc,nm,dv,"Ghi đè");S.hoEdit={q:nc};toast(`Đã ghi đè ${x.code} bằng ${nc}.${n?` Cập nhật ${n} biên bản.`:""}`);S.fedit?reModal():render();}
+  else if(a==="hoDel"){const k=b.dataset.k;if(S.arm!=="ho"+k){S.arm="ho"+k;S.fedit?reModal():render();return;}S.arm=null;const x=hoIx().code.get(k);await hoSave("add/"+k,null);await hoLog(`Xóa mã thêm tay ${k}${x?` – ${x.name}`:""}`);S.fedit?reModal():render();}
   else if(a==="hoPick"){const r=S.fedit.rows[+b.dataset.k];r.ma=b.dataset.c;r._hoTay=1;if(S.fedit.type==="fb_dc"||!r.ten){const x=hoGet(r.ma);if(x){r.ten=x.name;r.dvt=r.dvt||x.dvt;}}reModal();}
-  else if(a==="dupRow"){const i=+b.dataset.k;const r=clone(S.fedit.rows[i]);r._dup=1;S.fedit.rows.splice(i+1,0,r);reModal();}
-  else if(a==="copyForm"){const o=S.forms.find(x=>x.id===id);const f=clone(o);f.id="f_"+uid();f.status="draft";f.src="Lập trên app";f.date=today();f.month=curYM();if(f.type==="dong_phuc")f.rows.forEach(r=>{r.xnt=r.tt;r.tt="";r.gt="";});if(f.type==="fb_dem")f.rows.forEach(r=>{r.sl="";r.hh="";r.gcl="";r.gc="";});if(["quy_rap","quy_fb","float","du_thieu"].includes(f.type)){f.rows.forEach(r=>{r.sl=0;r.gc="";});f.h.note="";}if(f.type==="fb_dc")f.rows=[];if(f.type==="tich_truoc"){f.rows=ttCarry(curYM(),o);f.status="draft";f.h.duAn=`Chi phí Tháng ${curYM().slice(5)}/${curYM().slice(0,4)}`;}hoFix(f);S.fedit=f;render();}
+  else if(a==="dupRow"){const i=+b.dataset.k;const r=clone(S.fedit.rows[i]);r._dup=1;r._dupNeed={sl:1,hsd:1};S.fedit.rows.splice(i+1,0,r);reModal();}
+  else if(a==="copyForm"){const o=S.forms.find(x=>x.id===id);const f=clone(o);f.id="f_"+uid();f.status="draft";f.src="Lập trên app";f.date=today();f.month=curYM();if(f.h)delete f.h.hoAfterSign;if(f.type==="dong_phuc")f.rows.forEach(r=>{r.xnt=r.tt;r.tt="";r.gt="";});if(f.type==="fb_dem")f.rows.forEach(r=>{r.sl="";r.hh="";r.gcl="";r.gc="";});if(["quy_rap","quy_fb","float","du_thieu"].includes(f.type)){f.rows.forEach(r=>{r.sl=0;r.gc="";});f.h.note="";}if(f.type==="fb_dc")f.rows=[];if(f.type==="tich_truoc"){f.rows=ttCarry(curYM(),o);f.status="draft";f.h.duAn=`Chi phí Tháng ${curYM().slice(5)}/${curYM().slice(0,4)}`;}hoFix(f);S.fedit=f;render();}
   else if(a==="closeForm"){S.fedit=null;render();}
   else if(a==="saveForm"){await saveForm();}
   else if(a==="delForm"){if(S.arm==="delf"){S.arm=null;await Store.del("forms",S.fedit.id);S.fedit=null;toast("Đã xóa biên bản.");}else{S.arm="delf";renderModal();bind();}}
