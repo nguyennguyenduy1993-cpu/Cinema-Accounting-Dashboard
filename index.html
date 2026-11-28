@@ -157,7 +157,7 @@ a{color:var(--accent);font-weight:600}
 .dnc .it td{height:39pt}
 .dnc .it .ds{white-space:pre-line;vertical-align:middle}
 .dnc .it .ac{text-align:right;padding-right:4px}
-.dnc .tt td{background:var(--xl-total);color:#fff;font-weight:700;height:20.25pt}
+.dnc .tt td{background:var(--xl-total);color:#000;font-weight:700;height:20.25pt}
 .dnc .bank td{height:30pt}
 .dnc .sign td{font-weight:700;text-align:center}
 /* Mẫu biên bản */
@@ -693,7 +693,7 @@ function showLogin(err){
     try{sessionStorage.setItem("ctr-session",JSON.stringify({u:u.u,rap}))}catch(e){}enter(a,u);};
   setTimeout(()=>$("#lu")?.focus(),50);}
 async function enter(a,u){
-  S.user=u;S.rap=a.rap;
+  S.user=u;S.rap=a.rap;if(!isPilot()){Object.keys(KP).forEach(k=>delete KP[k]);_mcache.clear();}
   {const rs=userRaps(u);const nav=$("#rapTabs");if(nav){nav.hidden=rs.length<2;nav.innerHTML=rs.map(r=>{const x=(CFG.accounts||[]).find(y=>y.rap===r);return`<button data-rap="${esc(r)}" aria-selected="${r===a.rap}">${esc((x?.ten||r).replace(/^Galaxy\s+/,""))}</button>`;}).join("");
     nav.onclick=e=>{const bt=e.target.closest("[data-rap]");if(!bt||bt.dataset.rap===S.rap)return;try{sessionStorage.setItem("ctr-session",JSON.stringify({u:u.u,rap:bt.dataset.rap}))}catch(e){}location.reload();};}}S._kyFixed=false;S._loadedAll=false;Object.keys(KP).forEach(k=>delete KP[k]);if(a.rap==="PHI")Object.assign(KP,JSON.parse(JSON.stringify(KP_SEED)));$("#loginView").hidden=true;$("#app").hidden=false;$("#ttl").textContent=a.ten;S.tab="budget";
   $("#stat").textContent=DEMO?"":"Đang kết nối…";
@@ -741,7 +741,8 @@ function checks(d,selfId){
   if(!d.date)add("bad","Chưa có ngày hóa đơn","date");
   if(!d.ky)add("bad","Chưa có kỳ chi phí","ky");
   if(!d.cat)add("bad","Chưa chọn diễn giải chi phí","cat");else if(!invIfc(d))add("bad","Diễn giải chưa gắn IFC code","cat");
-  if(items.some(x=>!x.hm))add("warn","Có dòng chưa gắn hạng mục kinh phí","hm");
+  if(items.some(x=>!x.hm))add("bad","Có dòng chưa gắn hạng mục Kinh phí. Chọn hạng mục để số tiền được cộng vào Kinh phí rạp.","hm");
+  else if(items.some(x=>x._sug))add("warn","Hạng mục đang lấy theo gợi ý từ mẫu NCC của PHI. Kiểm tra lại trước khi xác nhận.","hm");
   if(!d.noDnc&&!d.payeeKey)add("bad","Chưa chọn người thụ hưởng","payee");
   const dup=S.inv.find(i=>i.id!==selfId&&i.status==="confirmed"&&i.seller?.mst===d.seller?.mst&&String(i.number)===String(d.number)&&String(i.serial||"")===String(d.serial||""));
   if(dup)add("bad",`Trùng hóa đơn đã lưu ngày ${dmy(dup.createdAt)}`,"number");
@@ -855,6 +856,10 @@ async function nonInvoice(q,r,texts,thumbs,hash){const types=r.pages.map(p=>p.ty
   if(ip>=0)return skip(q,"Chứng từ khác",`ĐNC đã ký${dncNums.length?" (HĐ "+dncNums.join(", ")+")":""} chưa khớp ĐNC nào trên app. Đã lưu tạm vào lưu trữ tháng ${ymLbl(ym)}; khi hóa đơn này được tải lên và xác nhận, app tự gắn ĐNC đã ký vào.`);
   return skip(q,"Chứng từ khác",`Không có hóa đơn GTGT. Đã lưu "${type}" vào lưu trữ tháng ${ymLbl(ym)}${v?" · "+v[1]:""}.`);}
 function imgCanvas(f){return new Promise((ok,no)=>{const im=new Image();im.onload=()=>{const c=document.createElement("canvas");c.width=im.naturalWidth;c.height=im.naturalHeight;c.getContext("2d").drawImage(im,0,0);ok(c);};im.onerror=no;im.src=URL.createObjectURL(f);});}
+/* Gợi ý hạng mục cho rạp chưa có mẫu NCC: lấy theo mẫu cùng MST của PHI, nếu không có thì theo diễn giải phổ biến nhất */
+let _hmCat=null;function hmSuggest(mst,desc,cat){const T=(DEFAULT_SETTINGS&&DEFAULT_SETTINGS.templates)||{};const r=ruleFor(T[mst],desc);if(r&&r[2])return{hm:r[2],cat:r[1]};
+  if(!_hmCat){_hmCat=new Map();Object.values(T).forEach(t=>(t.rules||[]).forEach(x=>{if(!x[1]||!x[2])return;const m=_hmCat.get(x[1])||new Map();m.set(x[2],(m.get(x[2])||0)+1);_hmCat.set(x[1],m);}));}
+  const m=cat&&_hmCat.get(cat);if(m){const hm=[...m.entries()].sort((a,b)=>b[1]-a[1])[0][0];return{hm,cat};}return null;}
 function ruleFor(tpl,desc){const n=nrm(desc);const rs=(tpl?.rules||[]);return rs.find(r=>r[0]&&n.includes(nrm(r[0])))||rs.find(r=>!r[0])||null;}
 function buildDraft(r,q){
   let mst=r.mst,mstFixed=null,mstFrom=null;if(mst&&!S.byMst.has(mst)){const near=nearestMst(mst);if(near){mstFixed=mst;mst=near;}}
@@ -869,12 +874,13 @@ function buildDraft(r,q){
   const lastInv=S.inv.filter(i=>i.status==="confirmed"&&i.seller?.mst===mst&&i.cat).sort((a,b)=>(b.confirmedAt||"").localeCompare(a.confirmedAt||""))[0];
   const cat=first?first[1]:(lastInv?.cat||tpl?.rules?.[0]?.[1]||"");
   if(!first&&lastInv)items.forEach(it=>{if(!it.hm)it.hm=lastInv.items?.[0]?.hm||"";});
+  let hmSug=false,sugCat="";if(!tpl)items.forEach(it=>{if(it.hm)return;const g=hmSuggest(mst,it.desc,cat);if(g){it.hm=g.hm;it._sug=1;hmSug=true;if(!sugCat&&g.cat)sugCat=g.cat;}});
   const gopTxt=tpl?.gop?.[cat]||null;
   const bk=banks().find(b=>b.mst&&mstN(b.mst)===mst);
   return{status:"draft",createdAt:nowIso(),source:"Quét từ PDF",pages:r.pages,invoiceCount:r.invoiceCount||1,text:r.text,
     seller:{name:v?v[1]:(tpl?.name||""),mst},mstFixed,mstFrom,vendorNo:used?used.vendorNo:(v?v[0]:""),serial,number:r.number||"",numberRaw:r.numberRaw||r.number||"",dncNumber:r.dncNumber||"",dncNums:r.dncNums||[],
     date:r.date||"",month:ymOf(r.date),ky:r.ky||ymOf(r.date),items,subtotal:r.subtotal||0,vat:r.vat||0,total:r.total||0,fixed:r.fixed||[],amtBad:r.amtBad||"",
-    itemNames:r.itemNames||[],cat,gop:gopTxt,payeeKey:tpl?.payeeKey||(bk?bk.key:S.settings?.thuHuongMacDinh||""),noDnc:!!tpl?.noDnc,note:"",userNote:"",learned:!!tpl};
+    itemNames:r.itemNames||[],cat:cat||sugCat,gop:gopTxt,payeeKey:tpl?.payeeKey||(bk?bk.key:S.settings?.thuHuongMacDinh||""),noDnc:!!tpl?.noDnc,note:"",userNote:"",learned:!!tpl};
 }
 function learnTemplate(d){
   const st=clone(S.settings);st.templates=st.templates||{};const t=st.templates[d.seller.mst]||{name:d.seller.name,rules:[],learned:0};
@@ -1022,9 +1028,14 @@ function vBudget(){
   const src=(KP[y]&&m<=KP[y].fileMonths)?`File ${esc(KP[y].src)}`:"Hóa đơn đã xác nhận (theo kỳ chi phí)";
   const vis=out.filter(o=>!S.hideZero||o.lvl===1||o.cur||o.lm||o.ly);
   const nFlag=[...flags.values()].filter(f=>f.type==="vat");const vatSum=nFlag.reduce((s,f)=>s+f.file-f.pre,0);
+  /* Dòng hóa đơn chưa được cộng vào Kinh phí: chưa có hạng mục, hoặc hạng mục không có trong bảng Kinh phí của năm */
+  const fileM=KP[y]&&m<=KP[y].fileMonths;const L2=kpRows(y).filter(r=>r.stt.split(".").length===2);const okHm=h=>!!h&&L2.some(r=>h===r.stt||String(h).startsWith(r.stt+"."));
+  const noHm=fileM?[]:S.inv.filter(i=>i.status==="confirmed"&&i.ky===ym&&(i.items||[]).some(it=>!okHm(it.hm)));
   const sel=S.budgetSel;const det=sel?S.inv.filter(i=>i.status==="confirmed"&&i.ky===ym&&(i.items||[]).some(it=>it.hm===sel||String(it.hm).startsWith(sel+"."))):[];
   return `<div class="panel"><div class="row"><span class="ttl grow">Kinh phí rạp tháng ${m}/${y} · trước VAT</span>
    <input type="file" id="kpFile" accept=".xlsx,.xls,.xlsb" hidden>${fnMenu("kp",[{h:"Hiển thị"},[`data-a="kpZero"`,`${S.hideZero?"☑":"☐"} Ẩn hạng mục không phát sinh`],[`data-a="kpNotes"`,`📝 ${S.showNotes?"Ẩn chú thích":"Hiện chú thích"}`],{h:"File Kinh phí"},[`data-a="kpExport"`,"📊 Xuất Excel để chỉnh sửa"],[`data-a="kpImport"`,"📎 Cập nhật file Kinh phí"]])}</div>
+   ${noHm.length?`<div class="msg bad"><b>⚠ ${noHm.length} hóa đơn chưa được cộng vào Kinh phí tháng ${m}/${y}</b> (tổng ${fmt(noHm.reduce((s,i)=>s+(i.items||[]).filter(it=>!okHm(it.hm)).reduce((a,it)=>a+(+it.amount||0),0),0))} đ trước VAT). Chọn hạng mục để cộng vào.
+     <div class="scroll" style="margin-top:6px"><table class="t" style="color:var(--fg);background:var(--panel)"><thead><tr><th>Ngày HĐ</th><th>NCC</th><th>Số HĐ</th><th>Nội dung</th><th class="n">Trước VAT</th><th>Lý do</th><th>Hạng mục</th></tr></thead><tbody>${noHm.flatMap(i=>(i.items||[]).map((it,ix)=>okHm(it.hm)?"":`<tr><td>${esc(dmy(i.date))}</td><td>${esc(i.seller?.name||"")}</td><td>${esc(i.number||"")}</td><td>${esc(it.desc||"")}</td><td class="n">${fmt(it.amount)}</td><td class="k">${it.hm?`Hạng mục ${esc(it.hm)} không có trong bảng Kinh phí ${y}`:"Chưa chọn hạng mục"}</td><td style="white-space:nowrap"><select data-hmfix="${esc(i.id)}|${ix}" style="max-width:260px">${hmOptions((()=>{const g=hmSuggest(i.seller?.mst,it.desc,i.cat);return g&&okHm(g.hm)?g.hm:"";})())}</select> <button class="b sm p" data-a="hmFixOk" data-k="${esc(i.id)}|${ix}">Cộng vào</button></td></tr>`)).join("")}</tbody></table></div></div>`:""}
    <div class="chips"><div class="chip"><span class="k">Tổng tháng ${m}/${y}</span><b>${fmt(T.cur)}</b></div><div class="chip"><span class="k">Tháng trước</span><b>${fmt(T.lm)}</b><span>${ch(T.cur,T.lm)}</span></div>
     <div class="chip"><span class="k">Cùng kỳ ${+y-1}</span><b>${T.ly?fmt(T.ly):"—"}</b><span>${T.ly?ch(T.cur,T.ly):""}</span></div></div>
    ${(()=>{const nd=[...flags.entries()].filter(([,f])=>f.type==="nodoc");const df=[...flags.values()].filter(f=>f.type==="diff");const none=!S.inv.some(i=>i.status==="confirmed"&&i.ky===ym);const tot=fmt(nd.reduce((a,[,f])=>a+f.file,0));
@@ -1260,7 +1271,7 @@ function draftsBox(drafts){S.openG=S.openG||new Set();S.dtab=S.dtab||{};const G=
     const foot=ds.length>1?`<div class="row" style="justify-content:flex-end;margin-top:8px"><span class="k">${ds.length} hóa đơn · tổng ${fmt(tot)} đ · vào chung 1 ĐNC</span><button class="b p" data-a="okAll" data-k="${esc(g)}" ${anyBad?"disabled":""}>Xác nhận cả bộ (${ds.length} HĐ)</button></div>`:"";
     return`<div class="panel" style="border:1px solid var(--line)">${tabs}${draftCard(act.id,ds.length>1)}${foot}</div>`;}).join("");
   return`<div class="panel"><span class="ttl">Bản nháp đang chờ (${list.length} bộ)</span><div class="scroll"><table class="t"><thead><tr><th>Nhà cung cấp</th><th>Số HĐ</th><th>Tổng tiền</th><th>Tải lúc</th><th>Trạng thái</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>${opened}`;}
-function hmOptions(sel){return`<option value="">Chọn hạng mục…</option>`+KPROWS.filter(r=>r.stt.includes(".")).map(r=>`<option value="${esc(r.stt)}" ${r.stt===sel?"selected":""}>${esc(r.stt)} ${esc(r.name)}</option>`).join("");}
+function hmOptions(sel){return`<option value="">Chọn hạng mục…</option>`+kpRows($("#year")?.value).filter(r=>r.stt.includes(".")).map(r=>`<option value="${esc(r.stt)}" ${r.stt===sel?"selected":""}>${esc(r.stt)} ${esc(r.name)}</option>`).join("");}
 function draftCard(id,inGrp){
   const d=S.edit.get(id);const cs=checks(d,id);const bad=f=>cs.some(c=>c.lv==="bad"&&c.f===f)?' style="border-color:var(--bad-line);background:var(--bad-bg)"':"";
   const sum=d.items.reduce((s,x)=>s+num(x.amount),0);const vopts=S.byMst.get(d.seller.mst)||[];const icon={bad:"bad",warn:"warn",inf:"inf"};const pages=d.file?.pages||[];
@@ -1673,7 +1684,9 @@ async function saveForm(){const f=S.fedit;if(!f)return;f.month=f.date.slice(0,7)
 
 /* ---------- Kiểm kê: kế hoạch định kỳ + báo cáo Vista ---------- */
 const KK_DEF={v:2,start:"2026-01",quy_rap:{mid:1,end:1},quy_fb:{mid:1,end:1},float:{mid:1,end:1},voucher:{mid:1,end:1},dong_phuc:{mid:1,end:1,months:""},fb_dem:{mid:1,end:1},fb_dc:{mid:1,end:1},du_thieu:{mid:0,end:0}};
-const kkPlan=()=>{const sp=(S.settings||{}).kkPlan||{};const p=Object.assign(clone(KK_DEF),sp);if(!(sp.v>=2)){p.v=2;p.start=KK_DEF.start;p.dong_phuc=clone(KK_DEF.dong_phuc);}return p;};
+/* Quỹ F&B tiền mặt chỉ có ở PHI */
+const kkTypes=()=>Object.keys(FT).filter(x=>FT[x].mod==="kk"&&(x!=="quy_fb"||isPilot()));
+const kkPlan=()=>{const sp=(S.settings||{}).kkPlan||{};const p=Object.assign(clone(KK_DEF),sp);if(!(sp.v>=2)){p.v=2;p.start=KK_DEF.start;p.dong_phuc=clone(KK_DEF.dong_phuc);}if(!isPilot())delete p.quy_fb;return p;};
 const pad2=n=>String(n).padStart(2,"0");
 function addDays(d,n){const x=new Date(+d.slice(0,4),+d.slice(5,7)-1,+d.slice(8,10)+n);return`${x.getFullYear()}-${pad2(x.getMonth()+1)}-${pad2(x.getDate())}`;}
 function kyDates(ym){const l=new Date(+ym.slice(0,4),+ym.slice(5),0).getDate();return{mid:`${ym}-15`,end:`${ym}-${pad2(l)}`};}
@@ -1694,7 +1707,7 @@ function kyState(type,ym,k,P){const f=kyForm(type,ym,k);const d=kyDates(ym)[k];c
   if(ym<(P.start||"0000"))return{lv:"",lbl:"Chưa theo dõi trên app",sym:"–"};
   if(t>addDays(d,3))return{lv:"bad",lbl:"Thiếu",sym:"✕"};if(t>=addDays(d,-2))return{lv:"warn",lbl:"Đến hạn",sym:"!"};return{lv:"neu",lbl:"Chưa đến kỳ",sym:"·"};}
 function vKkPlan(){const ym=curYM(),y=ym.slice(0,4),P=kkPlan(),D=kyDates(ym),t=today();
-  const kk=Object.keys(FT).filter(x=>FT[x].mod==="kk");
+  const kk=kkTypes();
   const card=k=>{const types=kk.filter(x=>inPlan(P[x],ym,k));const st=types.map(x=>[x,kyState(x,ym,k,P)]);const done=st.filter(([,s])=>s.sym==="✓").length;
     const sv=kySv(ym,k);const d=D[k];const dd=Math.round((new Date(d+"T00:00:00")-new Date(t+"T00:00:00"))/864e5);
     const extra=S.forms.filter(f=>modOf(f)==="kk"&&!types.includes(f.type)&&(()=>{const o=kyOf(f.date);return o&&o.ym===ym&&o.k===k})());
@@ -1913,7 +1926,7 @@ function kkRevCard(r,i){const o=kyOf(r.date);const f=r.type&&o?kyForm(r.type,o.y
   const sigTxt=!r.sig.color?"Scan đen trắng, không dò được chữ ký – kiểm tra bằng mắt":r.sig.n>=2?`Dò thấy ${r.sig.n} chữ ký (mực màu)`:`Chỉ dò thấy ${r.sig.n} chữ ký`;
   return`<div class="panel" style="border:1px solid var(--line)"><div class="row"><b class="grow">${esc(r.name)}</b>${r.err?`<span class="pill bad">${esc(r.err)}</span>`:""}</div>
    <div class="row" style="align-items:flex-start;gap:12px">${r.pages[0]?`<img src="${esc(r.pages[0])}" alt="" style="width:150px;border:1px solid var(--line);border-radius:6px">`:""}
-   <div class="grow"><div class="grid"><label class="f">Loại biên bản<select data-r="${i}" data-rf="type"><option value="">Không nhận ra – lưu như chứng từ khác</option>${Object.keys(FT).filter(x=>FT[x].mod==="kk").map(x=>`<option value="${x}" ${x===r.type?"selected":""}>${esc(FT[x].name)}</option>`).join("")}</select></label>
+   <div class="grow"><div class="grid"><label class="f">Loại biên bản<select data-r="${i}" data-rf="type"><option value="">Không nhận ra – lưu như chứng từ khác</option>${kkTypes().map(x=>`<option value="${x}" ${x===r.type?"selected":""}>${esc(FT[x].name)}</option>`).join("")}</select></label>
     <label class="f">Ngày trên biên bản<input type="date" data-r="${i}" data-rf="date" value="${esc(r.date||"")}"></label>
     <label class="f">Kỳ<input disabled value="${o?esc(kyLbl(o.k)+" "+ymLbl(o.ym)):"Ngày không thuộc kỳ 15 / cuối tháng"}"></label></div>
     <div class="k">${f?`Gắn với biên bản lập trên app: ${esc(FT[f.type].name)} ${fdate(f.date)} (${esc(FST[f.status][0])})`:r.type&&o?"Chưa có biên bản lập trên app cho kỳ này – bản scan sẽ được tính là biên bản của kỳ.":""}</div>
@@ -2094,7 +2107,8 @@ document.addEventListener("change",e=>{const pe=e.target.closest("[data-pe]");if
   const de=e.target.closest("[data-de]");if(de&&S.dncEdit){let v=de.value;if(de.dataset.n)v=num(v)||0;setPath(S.dncEdit,de.dataset.de,v);
     if(de.dataset.n){de.value=fmt(v);const rs=S.dncEdit.rows;rs.forEach((r,i)=>{const c=document.getElementById("detot"+i);if(c)c.textContent=fmt((+r.pre||0)+(+r.vat||0));});const g=document.getElementById("detotal");if(g)g.textContent=fmt(rs.reduce((a,r)=>a+(+r.pre||0)+(+r.vat||0),0));}return;}
   const ss=e.target.closest("[data-s]");if(ss&&S.scanEdit){S.scanEdit[ss.dataset.s]=ss.value;if(ss.dataset.s==="month"&&ss.value){S.scanEdit.linkId="";if(S.scanEdit.date&&!S.scanEdit.date.startsWith(ss.value))S.scanEdit.date="";renderModal();bind();}return;}
-  const el=e.target.closest("[data-e]");if(!el)return;const d=S.edit.get(el.dataset.id);if(!d)return;const k=el.dataset.e;
+  const hx=e.target.closest("[data-hmfix]");if(hx){const[iid,ix]=hx.dataset.hmfix.split("|");const inv=S.inv.find(i=>i.id===iid);if(inv&&hx.value)(async()=>{const n=clone(inv);n.items[+ix].hm=hx.value;delete n.items[+ix]._sug;n.hmFixAt=nowIso();n.hmFixBy=S.user?.u||"";await Store.put("inv",iid,n);await Store.addHist({at:nowIso(),summary:`Gắn hạng mục ${hx.value} cho HĐ ${inv.number} – ${inv.seller?.name||""}`});toast(`Đã gắn hạng mục cho HĐ ${inv.number}.`);render();})();return;}
+  const el=e.target.closest("[data-e]");if(!el)return;const d=S.edit.get(el.dataset.id);if(!d)return;const k=el.dataset.e;if(/^items\.\d+\.hm$/.test(k)){const it=d.items[+k.split(".")[1]];if(it)delete it._sug;}
   let v=el.dataset.b?el.checked:el.value;if(el.dataset.n)v=k.endsWith("vatRate")?(String(v).trim()===""?null:num(v)):Math.round(num(v));if(k==="seller.mst")v=mstN(v);
   if(k==="gopMode"){if(v){const t=tpls()[d.seller.mst];d.gop=t?.gop?.[d.cat]||d.cat;}else d.gop=null;}else setPath(d,k,v);
   if(k==="date"){d.month=ymOf(v);if(!d.ky)d.ky=ymOf(v);}
@@ -2125,6 +2139,7 @@ document.addEventListener("click",async e=>{const b0=e.target.closest("[data-a]"
   if(a==="nccRow"){const e2=S.nccEdit,i=+b.dataset.i;if(b.dataset.k==="gop")e2.gop.splice(i,1);else e2.t.rules.splice(i,1);e2.dirty=true;reModal();return;}
   if(a==="nccBankOff"){const x=S.nccEdit.banks[+b.dataset.i];x.inactive=!x.inactive;x._ch=1;S.nccEdit.dirty=true;reModal();return;}
   if(a==="nccDel"){if(S.arm!=="nccdel"){S.arm="nccdel";reModal();return;}S.arm=null;const e2=S.nccEdit;const st=clone(S.settings);delete st.templates[e2.mst];await Store.setSettings(st);await Store.addHist({at:nowIso(),summary:`Xóa mẫu NCC ${e2.t.name} (${e2.mst})`});S.nccEdit=null;render();return;}
+  if(a==="hmFixOk"){const sl=document.querySelector(`select[data-hmfix="${b.dataset.k}"]`);if(!sl||!sl.value){toast("Chọn hạng mục trước.","bad");return;}sl.dispatchEvent(new Event("change",{bubbles:true}));return;}
   if(a==="kpZero"){S.hideZero=!S.hideZero;render();return;}
   if(a==="kkNewF"){S.fedit=blankForm(b.dataset.k);render();return;}
   if(a==="sub"){S.sub=b.dataset.k;render();}
